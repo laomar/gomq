@@ -3,4 +3,4 @@
 .vscode
 .fleet
 node_modules
-config/*.json
+config
