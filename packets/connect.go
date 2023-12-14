@@ -2,7 +2,6 @@ package packets
 
 import (
 	"bytes"
-	"encoding/binary"
 	"io"
 )
 
@@ -10,8 +9,8 @@ import (
 type Connect struct {
 	FixHeader *FixHeader
 	// Variable Header
-	ProtocolName    string
-	ProtocolVersion byte
+	Protocol string
+	Version  byte
 	// Connect Flags
 	UsernameFlag bool
 	PasswordFlag bool
@@ -32,13 +31,12 @@ type Connect struct {
 }
 
 // Pack Connect Packet
-func (c *Connect) pack(w io.Writer) error {
-	var err error
-	var buf bytes.Buffer
-	buf.WriteByte(0x00)
-	buf.WriteByte(0x04)
-	buf.Write([]byte(c.ProtocolName))
-	buf.WriteByte(c.ProtocolVersion)
+func (c *Connect) Pack(w io.Writer) error {
+	bufw := &bytes.Buffer{}
+	bufw.WriteByte(0x00)
+	bufw.WriteByte(0x04)
+	bufw.Write([]byte(c.Protocol))
+	bufw.WriteByte(c.Version)
 	// write flags
 	var flags byte
 	if c.UsernameFlag {
@@ -60,46 +58,49 @@ func (c *Connect) pack(w io.Writer) error {
 	if c.Reserved {
 		flags |= 1
 	}
-	buf.WriteByte(flags)
+	bufw.WriteByte(flags)
 	// write keepalive
-	buf.WriteByte(byte(c.KeepAlive / 256))
-	buf.WriteByte(byte(c.KeepAlive % 256))
+	bufw.WriteByte(byte(c.KeepAlive / 256))
+	bufw.WriteByte(byte(c.KeepAlive % 256))
 	// write properties
-
+	if c.Version == V5 && c.Properties != nil {
+		c.Properties.pack(bufw)
+	}
 	// write payload
-	buf.Write(encodeString(c.ClientID))
+	bufw.Write(encodeString(c.ClientID))
 	if c.WillFlag {
 
-		buf.Write(encodeString(c.WillTopic))
-		buf.Write(encodeString(c.WillMsg))
+		bufw.Write(encodeString(c.WillTopic))
+		bufw.Write(encodeString(c.WillMsg))
 	}
 	if c.UsernameFlag {
-		buf.Write(encodeString(c.Username))
+		bufw.Write(encodeString(c.Username))
 	}
 	if c.PasswordFlag {
-		buf.Write(encodeString(c.Password))
+		bufw.Write(encodeString(c.Password))
 	}
 	// write fix header
-	c.FixHeader.PacketType = CONNECT
-	c.FixHeader.RemainLen = buf.Len()
-	err = c.FixHeader.pack(w)
-	if err != nil {
+	c.FixHeader = &FixHeader{
+		PacketType: CONNECT,
+		RemainLen:  bufw.Len(),
+	}
+	if err := c.FixHeader.pack(w); err != nil {
 		return err
 	}
-	_, err = buf.WriteTo(w)
+	_, err := bufw.WriteTo(w)
 	return err
 }
 
 // Unpack Connect Packet
-func (c *Connect) unpack(r io.Reader) error {
+func (c *Connect) Unpack(r io.Reader) error {
 	var err error
 	buf := make([]byte, c.FixHeader.RemainLen)
 	if _, err = io.ReadFull(r, buf); err != nil {
 		return err
 	}
 	bufr := bytes.NewBuffer(buf)
-	c.ProtocolName = decodeString(bufr)
-	if c.ProtocolVersion, err = bufr.ReadByte(); err != nil {
+	c.Protocol = decodeString(bufr)
+	if c.Version, err = bufr.ReadByte(); err != nil {
 		return err
 	}
 	var flags byte
@@ -113,9 +114,9 @@ func (c *Connect) unpack(r io.Reader) error {
 	c.WillFlag = flags&0x04 > 0
 	c.CleanStart = flags&0x02 > 0
 	c.Reserved = flags&0x01 > 0
-	c.KeepAlive = binary.BigEndian.Uint16(bufr.Next(2))
+	c.KeepAlive = readUint16(bufr)
 	// unpack properties
-	if c.ProtocolVersion == V5 {
+	if c.Version == V5 {
 		c.Properties = &Properties{}
 		if err = c.Properties.unpack(bufr); err != nil {
 			return err
@@ -124,7 +125,7 @@ func (c *Connect) unpack(r io.Reader) error {
 	// unpack payload
 	c.ClientID = decodeString(bufr)
 	if c.WillFlag {
-		if c.ProtocolVersion == V5 {
+		if c.Version == V5 {
 			c.WillProperties = &Properties{}
 			if err = c.Properties.unpack(bufr); err != nil {
 				return err
