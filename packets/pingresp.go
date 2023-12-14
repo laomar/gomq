@@ -13,7 +13,7 @@ func (c *Pingresp) Pack(w io.Writer) error {
 		PacketType: PINGRESP,
 		RemainLen:  0,
 	}
-	return c.FixHeader.pack(w)
+	return c.FixHeader.Pack(w)
 }
 
 // Unpack Pingresp Packet

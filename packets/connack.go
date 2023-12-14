@@ -24,13 +24,15 @@ func (c *Connack) Pack(w io.Writer) error {
 	}
 	bufw.WriteByte(c.ReasonCode)
 	if c.Version == V5 && c.Properties != nil {
-		c.Properties.pack(bufw)
+		if err := c.Properties.Pack(bufw); err != nil {
+			return err
+		}
 	}
 	c.FixHeader = &FixHeader{
 		PacketType: CONNACK,
 		RemainLen:  bufw.Len(),
 	}
-	if err := c.FixHeader.pack(w); err != nil {
+	if err := c.FixHeader.Pack(w); err != nil {
 		return err
 	}
 	_, err := bufw.WriteTo(w)

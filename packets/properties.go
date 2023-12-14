@@ -68,122 +68,127 @@ type Properties struct {
 }
 
 // Pack Connect Packet
-func (p *Properties) pack(w *bytes.Buffer) {
+func (p *Properties) Pack(w *bytes.Buffer) error {
+	buf := &bytes.Buffer{}
 	if p.PayloadFormat != nil {
-		w.WriteByte(PayloadFormat)
-		w.WriteByte(*p.PayloadFormat)
+		buf.WriteByte(PayloadFormat)
+		buf.WriteByte(*p.PayloadFormat)
 	}
 	if p.MessageExpiry != nil {
-		w.WriteByte(MessageExpiry)
-		writeUint32(w, *p.MessageExpiry)
+		buf.WriteByte(MessageExpiry)
+		writeUint32(buf, *p.MessageExpiry)
 	}
 	if p.ContentType != "" {
-		w.WriteByte(ContentType)
-		w.Write([]byte(p.ContentType))
+		buf.WriteByte(ContentType)
+		buf.Write([]byte(p.ContentType))
 	}
 	if p.ResponseTopic != "" {
-		w.WriteByte(ResponseTopic)
-		w.Write([]byte(p.ResponseTopic))
+		buf.WriteByte(ResponseTopic)
+		buf.Write([]byte(p.ResponseTopic))
 	}
 	if p.CorrelationData != "" {
-		w.WriteByte(CorrelationData)
-		w.Write([]byte(p.CorrelationData))
+		buf.WriteByte(CorrelationData)
+		buf.Write([]byte(p.CorrelationData))
 	}
 	if len(p.SubscriptionIdentifier) > 0 {
 		for _, si := range p.SubscriptionIdentifier {
-			w.WriteByte(SubscriptionIdentifier)
-			w.Write(encodeLength(int(si)))
+			buf.WriteByte(SubscriptionIdentifier)
+			buf.Write(encodeLength(int(si)))
 		}
 	}
 	if p.SessionExpiryInterval != nil {
-		w.WriteByte(SessionExpiryInterval)
-		writeUint32(w, *p.SessionExpiryInterval)
+		buf.WriteByte(SessionExpiryInterval)
+		writeUint32(buf, *p.SessionExpiryInterval)
 	}
 	if p.AssignedClientID != "" {
-		w.WriteByte(AssignedClientID)
-		w.Write([]byte(p.AssignedClientID))
+		buf.WriteByte(AssignedClientID)
+		buf.Write([]byte(p.AssignedClientID))
 	}
 	if p.ServerKeepAlive != nil {
-		w.WriteByte(ServerKeepAlive)
-		writeUint16(w, *p.ServerKeepAlive)
+		buf.WriteByte(ServerKeepAlive)
+		writeUint16(buf, *p.ServerKeepAlive)
 	}
 	if p.AuthMethod != "" {
-		w.WriteByte(AuthMethod)
-		w.Write([]byte(p.AuthMethod))
+		buf.WriteByte(AuthMethod)
+		buf.Write([]byte(p.AuthMethod))
 	}
 	if p.AuthData != "" {
-		w.WriteByte(AuthData)
-		w.Write([]byte(p.AuthData))
+		buf.WriteByte(AuthData)
+		buf.Write([]byte(p.AuthData))
 	}
 	if p.RequestProblemInfo != nil {
-		w.WriteByte(RequestProblemInfo)
-		w.WriteByte(*p.RequestProblemInfo)
+		buf.WriteByte(RequestProblemInfo)
+		buf.WriteByte(*p.RequestProblemInfo)
 	}
 	if p.WillDelayInterval != nil {
-		w.WriteByte(WillDelayInterval)
-		writeUint32(w, *p.WillDelayInterval)
+		buf.WriteByte(WillDelayInterval)
+		writeUint32(buf, *p.WillDelayInterval)
 	}
 	if p.RequestResponseInfo != nil {
-		w.WriteByte(RequestResponseInfo)
-		w.WriteByte(*p.RequestResponseInfo)
+		buf.WriteByte(RequestResponseInfo)
+		buf.WriteByte(*p.RequestResponseInfo)
 	}
 	if p.ResponseInfo != "" {
-		w.WriteByte(ResponseInfo)
-		w.Write([]byte(p.ResponseInfo))
+		buf.WriteByte(ResponseInfo)
+		buf.Write([]byte(p.ResponseInfo))
 	}
 	if p.ServerReference != "" {
-		w.WriteByte(ServerReference)
-		w.Write([]byte(p.ServerReference))
+		buf.WriteByte(ServerReference)
+		buf.Write([]byte(p.ServerReference))
 	}
 	if p.ReasonString != "" {
-		w.WriteByte(ReasonString)
-		w.Write([]byte(p.ReasonString))
+		buf.WriteByte(ReasonString)
+		buf.Write([]byte(p.ReasonString))
 	}
 	if p.ReceiveMaximum != nil {
-		w.WriteByte(ReceiveMaximum)
-		writeUint16(w, *p.ReceiveMaximum)
+		buf.WriteByte(ReceiveMaximum)
+		writeUint16(buf, *p.ReceiveMaximum)
 	}
 	if p.TopicAliasMaximum != nil {
-		w.WriteByte(TopicAliasMaximum)
-		writeUint16(w, *p.TopicAliasMaximum)
+		buf.WriteByte(TopicAliasMaximum)
+		writeUint16(buf, *p.TopicAliasMaximum)
 	}
 	if p.TopicAlias != nil {
-		w.WriteByte(TopicAlias)
-		writeUint16(w, *p.TopicAlias)
+		buf.WriteByte(TopicAlias)
+		writeUint16(buf, *p.TopicAlias)
 	}
 	if p.MaximumQoS != nil {
-		w.WriteByte(MaximumQoS)
-		w.WriteByte(*p.MaximumQoS)
+		buf.WriteByte(MaximumQoS)
+		buf.WriteByte(*p.MaximumQoS)
 	}
 	if p.RetainAvailable != nil {
-		w.WriteByte(RetainAvailable)
-		w.WriteByte(*p.RetainAvailable)
+		buf.WriteByte(RetainAvailable)
+		buf.WriteByte(*p.RetainAvailable)
 	}
 	for k, v := range p.User {
-		w.WriteByte(User)
-		w.Write(encodeString(k))
-		w.Write(encodeString(v))
+		buf.WriteByte(User)
+		buf.Write(encodeString(k))
+		buf.Write(encodeString(v))
 	}
 	if p.MaximumPacketSize != nil {
-		w.WriteByte(MaximumPacketSize)
-		writeUint32(w, *p.MaximumPacketSize)
+		buf.WriteByte(MaximumPacketSize)
+		writeUint32(buf, *p.MaximumPacketSize)
 	}
 	if p.WildcardSubAvailable != nil {
-		w.WriteByte(WildcardSubAvailable)
-		w.WriteByte(*p.WildcardSubAvailable)
+		buf.WriteByte(WildcardSubAvailable)
+		buf.WriteByte(*p.WildcardSubAvailable)
 	}
 	if p.SubIDAvailable != nil {
-		w.WriteByte(SubIDAvailable)
-		w.WriteByte(*p.SubIDAvailable)
+		buf.WriteByte(SubIDAvailable)
+		buf.WriteByte(*p.SubIDAvailable)
 	}
 	if p.SharedSubAvailable != nil {
-		w.WriteByte(SharedSubAvailable)
-		w.WriteByte(*p.SharedSubAvailable)
+		buf.WriteByte(SharedSubAvailable)
+		buf.WriteByte(*p.SharedSubAvailable)
 	}
+	l := encodeLength(buf.Len())
+	w.Write(l)
+	_, err := buf.WriteTo(w)
+	return err
 }
 
 // Unpack Properties
-func (p *Properties) unpack(r *bytes.Buffer) error {
+func (p *Properties) Unpack(r *bytes.Buffer) error {
 	var err error
 	l, err := decodeLength(r)
 	if err != nil {

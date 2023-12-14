@@ -3,14 +3,12 @@ package packets
 import (
 	"bytes"
 	"encoding/binary"
-	"errors"
 	"io"
 )
 
 // Packet type
 const (
-	RESERVED = iota
-	CONNECT
+	CONNECT = iota + 1
 	CONNACK
 	PUBLISH
 	PUBACK
@@ -32,6 +30,13 @@ const (
 	V31 = iota + 3
 	V311
 	V5
+)
+
+// MQTT Qos
+const (
+	Qos0 = iota
+	Qos1
+	Qos2
 )
 
 // V3 reason code
@@ -94,81 +99,24 @@ const (
 	WildcardSubNotSupported     = 0xA2
 )
 
-// FixHeader Struct
-type FixHeader struct {
-	PacketType byte
-	Flags      byte
-	Dup        bool
-	Qos        byte
-	Retain     bool
-	RemainLen  int
-}
-
-func NewPacket(fh *FixHeader) Packet {
+func NewPacket(fh *FixHeader, v byte) Packet {
 	switch fh.PacketType {
 	case CONNECT:
 		return &Connect{FixHeader: fh}
 	case PINGREQ:
 		return &Pingreq{FixHeader: fh}
+	case PUBLISH:
+		return &Publish{FixHeader: fh, Version: v}
+	case DISCONNECT:
+		return &Disconnect{FixHeader: fh, Version: v}
 	default:
 		return nil
 	}
 }
 
-func ReadPacket(r io.Reader) (Packet, error) {
-	var fh FixHeader
-	if err := fh.unpack(r); err != nil {
-		return nil, err
-	}
-	p := NewPacket(&fh)
-	if p == nil {
-		return p, errors.New("nil")
-	}
-	err := p.Unpack(r)
-	return p, err
-}
-
 type Packet interface {
 	Pack(w io.Writer) error
 	Unpack(r io.Reader) error
-}
-
-// Pack Fix Header
-func (fh *FixHeader) pack(w io.Writer) error {
-	if fh.PacketType == PUBLISH {
-		if fh.Dup {
-			fh.Flags |= 1 << 3
-		}
-		fh.Flags |= fh.Qos << 1
-		if fh.Retain {
-			fh.Flags |= 1
-		}
-	}
-	b := make([]byte, 1)
-	b[0] = fh.PacketType<<4 | fh.Flags
-	b = append(b, encodeLength(fh.RemainLen)...)
-	_, err := w.Write(b)
-	return err
-}
-
-// Unpack Fix Header
-func (fh *FixHeader) unpack(r io.Reader) error {
-	var err error
-	b := make([]byte, 1)
-	if _, err := io.ReadFull(r, b); err != nil {
-		return err
-	}
-	fh.PacketType = b[0] >> 4
-	fh.Flags = b[0] & 0x0F
-	if fh.PacketType == PUBLISH {
-		fh.Dup = fh.Flags>>3 > 0
-		fh.Qos = fh.Flags >> 1 & 0x03
-		fh.Retain = fh.Flags&0x01 > 0
-	}
-	if fh.RemainLen, err = decodeLength(r); err != nil {
-		return err
-	}
-	return nil
 }
 
 // Decode Length to int
@@ -218,6 +166,9 @@ func encodeString(s string) []byte {
 
 // Decode []byte to String
 func decodeString(r *bytes.Buffer) string {
+	if r.Len() < 2 {
+		return ""
+	}
 	l := int(binary.BigEndian.Uint16(r.Next(2)))
 	s := string(r.Next(l))
 	return s
@@ -225,9 +176,15 @@ func decodeString(r *bytes.Buffer) string {
 
 // Read Buffer to uint
 func readUint16(r *bytes.Buffer) uint16 {
+	if r.Len() < 2 {
+		return 0
+	}
 	return binary.BigEndian.Uint16(r.Next(2))
 }
 func readUint32(r *bytes.Buffer) uint32 {
+	if r.Len() < 4 {
+		return 0
+	}
 	return binary.BigEndian.Uint32(r.Next(4))
 }
 

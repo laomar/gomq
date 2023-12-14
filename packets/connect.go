@@ -64,7 +64,7 @@ func (c *Connect) Pack(w io.Writer) error {
 	bufw.WriteByte(byte(c.KeepAlive % 256))
 	// write properties
 	if c.Version == V5 && c.Properties != nil {
-		c.Properties.pack(bufw)
+		c.Properties.Pack(bufw)
 	}
 	// write payload
 	bufw.Write(encodeString(c.ClientID))
@@ -84,7 +84,7 @@ func (c *Connect) Pack(w io.Writer) error {
 		PacketType: CONNECT,
 		RemainLen:  bufw.Len(),
 	}
-	if err := c.FixHeader.pack(w); err != nil {
+	if err := c.FixHeader.Pack(w); err != nil {
 		return err
 	}
 	_, err := bufw.WriteTo(w)
@@ -118,7 +118,7 @@ func (c *Connect) Unpack(r io.Reader) error {
 	// unpack properties
 	if c.Version == V5 {
 		c.Properties = &Properties{}
-		if err = c.Properties.unpack(bufr); err != nil {
+		if err = c.Properties.Unpack(bufr); err != nil {
 			return err
 		}
 	}
@@ -127,7 +127,7 @@ func (c *Connect) Unpack(r io.Reader) error {
 	if c.WillFlag {
 		if c.Version == V5 {
 			c.WillProperties = &Properties{}
-			if err = c.Properties.unpack(bufr); err != nil {
+			if err = c.Properties.Unpack(bufr); err != nil {
 				return err
 			}
 		}

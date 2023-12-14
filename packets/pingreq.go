@@ -13,7 +13,7 @@ func (c *Pingreq) Pack(w io.Writer) error {
 		PacketType: PINGREQ,
 		RemainLen:  0,
 	}
-	return c.FixHeader.pack(w)
+	return c.FixHeader.Pack(w)
 }
 
 // Unpack Pingreq Packet
