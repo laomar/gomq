@@ -2,7 +2,6 @@ package packets
 
 import (
 	"bytes"
-	"fmt"
 	"io"
 )
 
@@ -289,7 +288,6 @@ func (p *Properties) Unpack(r *bytes.Buffer) error {
 			b, err = buf.ReadByte()
 			p.SharedSubAvailable = &b
 		default:
-			fmt.Println(prop)
 		}
 		if err != nil {
 			return err

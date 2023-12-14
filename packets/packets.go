@@ -3,6 +3,7 @@ package packets
 import (
 	"bytes"
 	"encoding/binary"
+	"fmt"
 	"io"
 )
 
@@ -47,8 +48,6 @@ const (
 	RefusedServerUnavailable     = 0x03
 	RefusedBadUsernameOrPassword = 0x04
 	RefusedNotAuthorised         = 0x05
-	NetworkError                 = 0xFE
-	ProtocolViolation            = 0xFF
 )
 
 // V5 reason code
@@ -99,6 +98,15 @@ const (
 	WildcardSubNotSupported     = 0xA2
 )
 
+type Error struct {
+	Code   byte
+	Reason string
+}
+
+func (e *Error) Error() string {
+	return fmt.Sprintf("Error Code: %x, Reason: %s", e.Code, e.Reason)
+}
+
 func NewPacket(fh *FixHeader, v byte) Packet {
 	switch fh.PacketType {
 	case CONNECT:
@@ -114,6 +122,7 @@ func NewPacket(fh *FixHeader, v byte) Packet {
 	}
 }
 
+// Packet interface
 type Packet interface {
 	Pack(w io.Writer) error
 	Unpack(r io.Reader) error
