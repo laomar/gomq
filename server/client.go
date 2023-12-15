@@ -4,7 +4,6 @@ import (
 	"context"
 	"errors"
 	"gomq/packets"
-	"log"
 	"net"
 )
 
@@ -94,8 +93,14 @@ func (c *client) handleLoop() {
 				c.pingreq()
 			case *packets.Publish:
 				c.publish(p)
-				//default:
-				//	log.Println("default handle")
+			case *packets.Pubrel:
+				c.pubrel(p)
+			case *packets.Subscribe:
+				c.subscribe(p)
+			case *packets.Unsubscribe:
+				c.unsubscribe(p)
+			case *packets.Auth:
+				c.auth(p)
 			}
 		}
 	}
@@ -112,13 +117,12 @@ func (c *client) close() {
 
 // Handle connect
 func (c *client) connect(pc *packets.Connect) {
-	log.Println(pc)
 	c.Version = pc.Version
 	ta := uint16(8)
 	ack := &packets.Connack{
 		Version:        pc.Version,
 		ReasonCode:     packets.Success,
-		SessionPresent: pc.CleanStart,
+		SessionPresent: false,
 		Properties:     &packets.Properties{TopicAliasMaximum: &ta},
 	}
 	_ = ack.Pack(c.conn)
@@ -133,13 +137,58 @@ func (c *client) disconnect(pd *packets.Disconnect) {
 
 // Handle publish
 func (c *client) publish(pp *packets.Publish) {
-	log.Println(pp)
-	ack := &packets.Puback{
+	switch pp.FixHeader.Qos {
+	case packets.Qos0:
+	case packets.Qos1:
+		ack := &packets.Puback{
+			Version:    c.Version,
+			ReasonCode: packets.Success,
+			PacketID:   pp.PacketID,
+		}
+		_ = ack.Pack(c.conn)
+	case packets.Qos2:
+		rec := &packets.Pubrec{
+			Version:    c.Version,
+			ReasonCode: packets.Success,
+			PacketID:   pp.PacketID,
+		}
+		_ = rec.Pack(c.conn)
+	}
+}
+
+// Handle pubrel
+func (c *client) pubrel(pp *packets.Pubrel) {
+	rec := &packets.Pubcomp{
 		Version:    c.Version,
 		ReasonCode: packets.Success,
 		PacketID:   pp.PacketID,
 	}
+	_ = rec.Pack(c.conn)
+}
+
+// Handle Subscribe
+func (c *client) subscribe(ps *packets.Subscribe) {
+	ack := &packets.Suback{
+		Version:  c.Version,
+		PacketID: ps.PacketID,
+		Payload:  []byte{packets.Success},
+	}
 	_ = ack.Pack(c.conn)
+}
+
+// Handle Unsubscribe
+func (c *client) unsubscribe(pu *packets.Unsubscribe) {
+	ack := &packets.Unsuback{
+		Version:  c.Version,
+		PacketID: pu.PacketID,
+		Payload:  []byte{packets.Success},
+	}
+	_ = ack.Pack(c.conn)
+}
+
+// Handle auth
+func (c *client) auth(pa *packets.Auth) {
+
 }
 
 // Handle ping

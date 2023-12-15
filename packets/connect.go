@@ -60,16 +60,21 @@ func (c *Connect) Pack(w io.Writer) error {
 	}
 	bufw.WriteByte(flags)
 	// write keepalive
-	bufw.WriteByte(byte(c.KeepAlive / 256))
-	bufw.WriteByte(byte(c.KeepAlive % 256))
+	writeUint16(bufw, c.KeepAlive)
 	// write properties
 	if c.Version == V5 && c.Properties != nil {
-		c.Properties.Pack(bufw)
+		if err := c.Properties.Pack(bufw); err != nil {
+			return err
+		}
 	}
 	// write payload
 	bufw.Write(encodeString(c.ClientID))
 	if c.WillFlag {
-
+		if c.Version == V5 && c.WillProperties != nil {
+			if err := c.WillProperties.Pack(bufw); err != nil {
+				return err
+			}
+		}
 		bufw.Write(encodeString(c.WillTopic))
 		bufw.Write(encodeString(c.WillMsg))
 	}
@@ -110,7 +115,7 @@ func (c *Connect) Unpack(r io.Reader) error {
 	c.UsernameFlag = flags&0x80 > 0
 	c.PasswordFlag = flags&0x40 > 0
 	c.WillRetain = flags&0x20 > 0
-	c.WillQos = flags & 0x18 >> 3
+	c.WillQos = (flags & 0x18) >> 3
 	c.WillFlag = flags&0x04 > 0
 	c.CleanStart = flags&0x02 > 0
 	c.Reserved = flags&0x01 > 0

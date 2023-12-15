@@ -18,9 +18,13 @@ type Puback struct {
 func (p *Puback) Pack(w io.Writer) error {
 	bufw := &bytes.Buffer{}
 	writeUint16(bufw, p.PacketID)
-	if p.Version == V5 && p.Properties != nil {
+	if p.Version == V5 {
 		bufw.WriteByte(p.ReasonCode)
-		p.Properties.Pack(bufw)
+		if p.Properties != nil {
+			p.Properties.Pack(bufw)
+		} else {
+			bufw.WriteByte(0)
+		}
 	}
 	p.FixHeader = &FixHeader{
 		PacketType: PUBACK,

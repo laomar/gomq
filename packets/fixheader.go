@@ -1,6 +1,8 @@
 package packets
 
-import "io"
+import (
+	"io"
+)
 
 // FixHeader Struct
 type FixHeader struct {
@@ -41,7 +43,7 @@ func (fh *FixHeader) Unpack(r io.Reader) error {
 	fh.Flags = b[0] & 0x0F
 	if fh.PacketType == PUBLISH {
 		fh.Dup = fh.Flags>>3 > 0
-		fh.Qos = fh.Flags >> 1 & 0x03
+		fh.Qos = (fh.Flags >> 1) & 0x03
 		fh.Retain = fh.Flags&0x01 > 0
 	}
 	if fh.RemainLen, err = decodeLength(r); err != nil {

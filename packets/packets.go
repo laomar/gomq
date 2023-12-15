@@ -98,6 +98,11 @@ const (
 	WildcardSubNotSupported     = 0xA2
 )
 
+var (
+	ErrMalformed = &Error{Code: MalformedPacket}
+	ErrProtocol  = &Error{Code: ProtocolError}
+)
+
 type Error struct {
 	Code   byte
 	Reason string
@@ -115,8 +120,16 @@ func NewPacket(fh *FixHeader, v byte) Packet {
 		return &Pingreq{FixHeader: fh}
 	case PUBLISH:
 		return &Publish{FixHeader: fh, Version: v}
+	case PUBREL:
+		return &Pubrel{FixHeader: fh, Version: v}
 	case DISCONNECT:
 		return &Disconnect{FixHeader: fh, Version: v}
+	case SUBSCRIBE:
+		return &Subscribe{FixHeader: fh, Version: v}
+	case UNSUBSCRIBE:
+		return &Unsubscribe{FixHeader: fh, Version: v}
+	case AUTH:
+		return &Auth{FixHeader: fh}
 	default:
 		return nil
 	}
