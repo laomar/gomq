@@ -2,7 +2,7 @@ package server
 
 import (
 	"context"
-	"errors"
+	"gomq/log"
 	"gomq/packets"
 	"net"
 )
@@ -17,6 +17,7 @@ const (
 type client struct {
 	ctx           context.Context
 	cancel        context.CancelFunc
+	server        *Server
 	conn          net.Conn
 	ID            string
 	Username      string
@@ -47,7 +48,7 @@ func (c *client) readPacket() (packets.Packet, error) {
 	}
 	p := packets.NewPacket(&fh, c.Version)
 	if p == nil {
-		return p, errors.New("nil")
+		return p, packets.ErrProtocol
 	}
 	err := p.Unpack(c.conn)
 	return p, err
@@ -55,9 +56,9 @@ func (c *client) readPacket() (packets.Packet, error) {
 
 func (c *client) readLoop() {
 	defer func() {
-		//if r := recover(); r != nil {
-		//	log.Println("recover", r)
-		//}
+		if r := recover(); r != nil {
+			log.Errorf("Client: %v", r)
+		}
 	}()
 	for {
 		select {
@@ -65,8 +66,8 @@ func (c *client) readLoop() {
 			return
 		default:
 			p, err := c.readPacket()
-			//log.Println(c.ID, p, err)
 			if err != nil {
+				log.Debugf("Client: %v", err)
 				return
 			}
 			c.in <- p
@@ -168,6 +169,7 @@ func (c *client) pubrel(pp *packets.Pubrel) {
 
 // Handle Subscribe
 func (c *client) subscribe(ps *packets.Subscribe) {
+	c.server.wsch <- true
 	ack := &packets.Suback{
 		Version:  c.Version,
 		PacketID: ps.PacketID,
