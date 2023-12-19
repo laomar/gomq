@@ -29,14 +29,23 @@ type Log struct {
 type Config struct {
 	Env       string
 	DataDir   string
+	PidFile   string
 	Listeners map[string]Listener
 	Log
 }
 
 var Cfg *Config
 
-func Parse() {
-	// default value
+func abs(p string) string {
+	if strings.HasPrefix(p, "/") {
+		return p
+	}
+	appdir, _ := filepath.Abs(filepath.Dir(os.Args[0]))
+	return path.Join(appdir, p)
+}
+
+func ParseConfig() {
+	// Default value
 	viper.SetDefault("env", "prod")
 	viper.SetDefault("datadir", "./data")
 	viper.SetDefault("tcp.port", 1883)
@@ -45,23 +54,23 @@ func Parse() {
 	viper.SetDefault("ws.port", 8083)
 	viper.SetDefault("ws.enable", true)
 	viper.SetDefault("wss.port", 8084)
-	// config file
-	viper.AddConfigPath("./config")
+
+	// Config file
+	confdir := abs("./config")
 	viper.AddConfigPath("/etc/gomq")
+	viper.AddConfigPath(confdir)
 	viper.SetConfigName("gomq")
 	if err := viper.ReadInConfig(); err != nil {
-		log.Println(err)
+		log.Fatal(err)
 	}
-	// environment variables
+
+	// Environment variables
 	viper.SetEnvPrefix("gomq")
 	viper.AutomaticEnv()
 	viper.SetEnvKeyReplacer(strings.NewReplacer(".", "_"))
 
 	// config value
-	datadir := viper.GetString("datadir")
-	if !strings.HasPrefix(datadir, "/") {
-		datadir = path.Join(filepath.Dir(os.Args[0]), datadir)
-	}
+	datadir := abs(viper.GetString("datadir"))
 	if _, err := os.Stat(datadir); os.IsNotExist(err) {
 		if err := os.MkdirAll(datadir, 0755); err != nil {
 			log.Fatal(err)
@@ -79,15 +88,16 @@ func Parse() {
 			ln.Path = viper.GetString(t + ".path")
 		}
 		if t == "ssl" || t == "wss" {
-			ln.CACert = viper.GetString(t + ".cacert")
-			ln.TLSCert = viper.GetString(t + ".tlscert")
-			ln.TLSKey = viper.GetString(t + ".tlskey")
+			ln.CACert = abs(viper.GetString(t + ".cacert"))
+			ln.TLSCert = abs(viper.GetString(t + ".tlscert"))
+			ln.TLSKey = abs(viper.GetString(t + ".tlskey"))
 		}
 		lns[t] = ln
 	}
 	Cfg = &Config{
 		Env:       viper.GetString("env"),
 		DataDir:   datadir,
+		PidFile:   abs(viper.GetString("pidfile")),
 		Listeners: lns,
 		Log: Log{
 			viper.GetString("log.level"),

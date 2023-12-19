@@ -2,34 +2,26 @@ package main
 
 import (
 	"github.com/spf13/cobra"
-	"gomq/config"
+	. "gomq/config"
 	"gomq/log"
-	"gomq/server"
+	. "gomq/server"
 )
 
+// Root command
 var rootCmd = &cobra.Command{
 	Use:     "gomqd",
 	Short:   "Gomq is a high-performance MQTT broker for IoT",
 	Version: "1.0.0",
 }
 
-var startCmd = &cobra.Command{
-	Use:   "start",
-	Short: "Start gomq broker",
-	Run: func(cmd *cobra.Command, args []string) {
-		server := server.New()
-		server.Start()
-	},
-}
-
 func init() {
-	config.Parse()
+	ParseConfig()
 	log.Init()
 }
 
 func main() {
-	rootCmd.AddCommand(startCmd)
+	rootCmd.AddCommand(StartCmd(), StopCmd(), ReloadCmd())
 	if err := rootCmd.Execute(); err != nil {
-		log.Fatal(err)
+		log.Errorf("Cmd: %v", err)
 	}
 }
