@@ -59,6 +59,7 @@ func ParseConfig() {
 	confdir := abs("./config")
 	viper.AddConfigPath("/etc/gomq")
 	viper.AddConfigPath(confdir)
+	viper.AddConfigPath("./config")
 	viper.SetConfigName("gomq")
 	if err := viper.ReadInConfig(); err != nil {
 		log.Fatal(err)

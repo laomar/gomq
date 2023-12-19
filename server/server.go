@@ -22,30 +22,26 @@ import (
 
 // Server struct
 type Server struct {
-	ctx     context.Context
-	cancel  context.CancelFunc
-	gw      sync.WaitGroup
-	clients *sync.Map
-	tcpch   chan bool
-	sslch   chan bool
-	wsch    chan bool
-	wssch   chan bool
+	ctx       context.Context
+	cancel    context.CancelFunc
+	gw        sync.WaitGroup
+	clients   *sync.Map
+	cancelTcp context.CancelFunc
+	cancelSsl context.CancelFunc
+	cancelWs  context.CancelFunc
+	cancelWss context.CancelFunc
 }
 
 func New() *Server {
 	s := &Server{
 		clients: new(sync.Map),
-		tcpch:   make(chan bool),
-		sslch:   make(chan bool),
-		wsch:    make(chan bool),
-		wssch:   make(chan bool),
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	return s
 }
 
 // Client init
-func (s *Server) client(conn net.Conn) *client {
+func (s *Server) client(ctx context.Context, conn net.Conn) *client {
 	c := &client{
 		server: s,
 		conn:   conn,
@@ -54,7 +50,7 @@ func (s *Server) client(conn net.Conn) *client {
 		in:     make(chan packets.Packet, 8),
 		out:    make(chan packets.Packet, 8),
 	}
-	c.ctx, c.cancel = context.WithCancel(s.ctx)
+	c.ctx, c.cancel = context.WithCancel(ctx)
 	return c
 }
 
@@ -62,32 +58,32 @@ func (s *Server) client(conn net.Conn) *client {
 func (s *Server) tcp() {
 	lc, ok := Cfg.Listeners["tcp"]
 	if !ok || !lc.Enable {
-		s.gw.Done()
 		return
 	}
 	ln, err := net.Listen("tcp", lc.Address+":"+lc.Port)
 	if err != nil {
-		log.Errorf("TCP: %v", err)
+		log.Errorf("tcp: %v", err)
 		return
 	}
 	defer ln.Close()
-	log.Info("TCP: started")
-	s.gw.Done()
-	for {
-		select {
-		case <-s.ctx.Done():
-			log.Info("TCP: stopped")
-			return
-		case <-s.tcpch:
-			log.Info("TCP: stopped")
-			return
-		default:
+	var ctx context.Context
+	ctx, s.cancelTcp = context.WithCancel(s.ctx)
+	go func() {
+		for {
 			conn, err := ln.Accept()
 			if err != nil {
 				continue
 			}
-			c := s.client(conn)
+			c := s.client(ctx, conn)
 			go c.serve()
+		}
+	}()
+	log.Infof("tcp: listening %s", lc.Address+":"+lc.Port)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("tcp: closed")
+			return
 		}
 	}
 }
@@ -96,14 +92,13 @@ func (s *Server) tcp() {
 func (s *Server) ssl() {
 	lc, ok := Cfg.Listeners["ssl"]
 	if !ok || !lc.Enable {
-		s.gw.Done()
 		return
 	}
 	var cert tls.Certificate
 	var err error
 	cert, err = tls.LoadX509KeyPair(lc.TLSCert, lc.TLSKey)
 	if err != nil {
-		log.Errorf("SSL: %v", err)
+		log.Errorf("ssl: %v", err)
 		return
 	}
 	var ln net.Listener
@@ -111,27 +106,28 @@ func (s *Server) ssl() {
 		Certificates: []tls.Certificate{cert},
 	})
 	if err != nil {
-		log.Errorf("TCP: %v", err)
+		log.Errorf("ssl: %v", err)
 		return
 	}
 	defer ln.Close()
-	log.Info("SSL: started")
-	s.gw.Done()
-	for {
-		select {
-		case <-s.ctx.Done():
-			log.Info("SSL: stopped")
-			return
-		case <-s.sslch:
-			log.Info("SSL: stopped")
-			return
-		default:
+	var ctx context.Context
+	ctx, s.cancelSsl = context.WithCancel(s.ctx)
+	go func() {
+		for {
 			conn, err := ln.Accept()
 			if err != nil {
 				continue
 			}
-			c := s.client(conn)
+			c := s.client(ctx, conn)
 			go c.serve()
+		}
+	}()
+	log.Infof("ssl: listening %s", lc.Address+":"+lc.Port)
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("ssl: closed")
+			return
 		}
 	}
 }
@@ -140,13 +136,14 @@ func (s *Server) ssl() {
 func (s *Server) ws() {
 	lc, ok := Cfg.Listeners["ws"]
 	if !ok || !lc.Enable {
-		s.gw.Done()
 		return
 	}
+	var ctx context.Context
+	ctx, s.cancelWs = context.WithCancel(s.ctx)
 	router := http.NewServeMux()
 	router.Handle(lc.Path, websocket.Handler(func(conn *websocket.Conn) {
 		conn.PayloadType = websocket.BinaryFrame
-		c := s.client(conn)
+		c := s.client(ctx, conn)
 		c.serve()
 	}))
 	server := &http.Server{
@@ -156,33 +153,30 @@ func (s *Server) ws() {
 		WriteTimeout: 5 * time.Second,
 	}
 	go func() {
-		<-s.wsch
-		if err := server.Shutdown(context.Background()); err != nil {
-			log.Errorf("WS: %v", err)
+		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+			log.Errorf("ws: %v", err)
 		}
 	}()
-	log.Info("WS: started")
-	s.gw.Done()
-	if err := server.ListenAndServe(); err != nil {
-		if err == http.ErrServerClosed {
-			log.Info("WS: stopped")
-		} else {
-			log.Errorf("WS: %v", err)
-		}
+	log.Infof("ws: listening %s", lc.Address+":"+lc.Port)
+	<-ctx.Done()
+	if err := server.Shutdown(ctx); err != nil {
+		log.Errorf("ws: %v", err)
 	}
+	log.Info("ws: closed")
 }
 
 // Websocket ssl server
 func (s *Server) wss() {
 	lc, ok := Cfg.Listeners["wss"]
 	if !ok || !lc.Enable {
-		s.gw.Done()
 		return
 	}
+	var ctx context.Context
+	ctx, s.cancelWss = context.WithCancel(s.ctx)
 	router := http.NewServeMux()
 	router.Handle(lc.Path, websocket.Handler(func(conn *websocket.Conn) {
 		conn.PayloadType = websocket.BinaryFrame
-		c := s.client(conn)
+		c := s.client(ctx, conn)
 		c.serve()
 	}))
 	server := &http.Server{
@@ -192,52 +186,56 @@ func (s *Server) wss() {
 		WriteTimeout: 5 * time.Second,
 	}
 	go func() {
-		<-s.wssch
-		if err := server.Shutdown(s.ctx); err != nil {
-			log.Errorf("WSS: %v", err)
+		if err := server.ListenAndServeTLS(lc.TLSCert, lc.TLSKey); err != nil && err != http.ErrServerClosed {
+			log.Errorf("wss: %v", err)
 		}
 	}()
-	log.Info("WSS: started")
-	s.gw.Done()
-	if err := server.ListenAndServeTLS(lc.TLSCert, lc.TLSKey); err != nil {
-		if err == http.ErrServerClosed {
-			log.Info("WSS: stopped")
-		} else {
-			log.Errorf("WSS: %v", err)
-		}
+	log.Infof("wss: listening %s", lc.Address+":"+lc.Port)
+	<-ctx.Done()
+	if err := server.Shutdown(ctx); err != nil {
+		log.Errorf("wss: %v", err)
 	}
+	log.Info("wss: closed")
 }
 
 // Start server
 func (s *Server) Start() {
-	log.Info("Server: starting...")
-	s.gw.Add(5)
+	log.Info("gomq: starting...")
 	go s.tcp()
 	go s.ssl()
 	go s.ws()
 	go s.wss()
 	go s.signal()
-	s.gw.Wait()
-	log.Info("Server: started")
 	<-s.ctx.Done()
-	log.Info("Server: stopped")
+	time.Sleep(3 * time.Second)
+	log.Info("gomq: stopped")
 }
 
 // Stop server
 func (s *Server) Stop() {
-	s.cancel()
+	defer s.cancel()
 	os.Remove(Cfg.PidFile)
 }
 
 // Reload server
 func (s *Server) Reload() {
+	log.Info("gomq: reload...")
 	ParseConfig()
-	log.Info("Server: reloaded")
+	log.Init()
+
+	s.cancelTcp()
+	s.cancelSsl()
+	s.cancelWs()
+	s.cancelWss()
+	time.Sleep(3 * time.Second)
+	go s.tcp()
+	go s.ssl()
+	go s.ws()
+	go s.wss()
 }
 
 // Signal process
 func (s *Server) signal() {
-	s.gw.Done()
 	stop := make(chan os.Signal)
 	signal.Notify(stop, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
 	reload := make(chan os.Signal)
@@ -260,21 +258,21 @@ func ReloadCmd() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			bs, err := os.ReadFile(Cfg.PidFile)
 			if err != nil {
-				log.Errorf("Server reload: %v", err)
+				log.Errorf("gomq reload: %v", err)
 				return
 			}
 			pid, err := strconv.Atoi(string(bs))
 			if err != nil {
-				log.Errorf("Server reload: %v", err)
+				log.Errorf("gomq reload: %v", err)
 				return
 			}
 			p, err := os.FindProcess(pid)
 			if err != nil {
-				log.Errorf("Server reload: %v", err)
+				log.Errorf("gomq reload: %v", err)
 				return
 			}
 			if err := p.Signal(syscall.SIGHUP); err != nil {
-				log.Errorf("Server reload: %v", err)
+				log.Errorf("gomq reload: %v", err)
 			}
 		},
 	}
@@ -288,21 +286,21 @@ func StopCmd() *cobra.Command {
 		Run: func(cmd *cobra.Command, args []string) {
 			bs, err := os.ReadFile(Cfg.PidFile)
 			if err != nil {
-				log.Errorf("Server stop: %v", err)
+				log.Errorf("gomq stop: %v", err)
 				return
 			}
 			pid, err := strconv.Atoi(string(bs))
 			if err != nil {
-				log.Errorf("Server stop: %v", err)
+				log.Errorf("gomq stop: %v", err)
 				return
 			}
 			p, err := os.FindProcess(pid)
 			if err != nil {
-				log.Errorf("Server stop: %v", err)
+				log.Errorf("gomq stop: %v", err)
 				return
 			}
 			if err := p.Signal(os.Interrupt); err != nil {
-				log.Errorf("Server stop: %v", err)
+				log.Errorf("gomq stop: %v", err)
 			}
 		},
 	}
@@ -317,12 +315,12 @@ func StartCmd() *cobra.Command {
 			piddir := filepath.Dir(Cfg.PidFile)
 			if _, err := os.Stat(piddir); os.IsNotExist(err) {
 				if err := os.MkdirAll(piddir, 0755); err != nil {
-					log.Fatalf("Server start: %v", err)
+					log.Fatalf("gomq start: %v", err)
 				}
 			}
 			pid := fmt.Sprintf("%d", os.Getpid())
 			if err := os.WriteFile(Cfg.PidFile, []byte(pid), 0644); err != nil {
-				log.Fatalf("Server start: %v", err)
+				log.Fatalf("gomq start: %v", err)
 			}
 			server := New()
 			server.Start()

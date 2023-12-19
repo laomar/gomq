@@ -38,6 +38,8 @@ func (c *client) serve() {
 	go c.writeLoop()
 	go c.handleLoop()
 	<-c.ctx.Done()
+	c.conn.Close()
+	c.Status = Disconnected
 }
 
 // Read packet
@@ -109,11 +111,7 @@ func (c *client) handleLoop() {
 
 // Client close
 func (c *client) close() {
-	c.cancel()
-	if c.conn != nil {
-		_ = c.conn.Close()
-	}
-	c.Status = Disconnected
+	defer c.cancel()
 }
 
 // Handle connect
@@ -169,7 +167,6 @@ func (c *client) pubrel(pp *packets.Pubrel) {
 
 // Handle Subscribe
 func (c *client) subscribe(ps *packets.Subscribe) {
-	c.server.wsch <- true
 	ack := &packets.Suback{
 		Version:  c.Version,
 		PacketID: ps.PacketID,
