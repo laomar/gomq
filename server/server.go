@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"github.com/pires/go-proxyproto"
 	"github.com/spf13/cobra"
 	"golang.org/x/net/websocket"
 	. "gomq/config"
@@ -11,6 +12,7 @@ import (
 	"gomq/packets"
 	"net"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -24,7 +26,7 @@ import (
 type Server struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
-	gw        sync.WaitGroup
+	m         sync.RWMutex
 	clients   *sync.Map
 	cancelTcp context.CancelFunc
 	cancelSsl context.CancelFunc
@@ -45,10 +47,10 @@ func (s *Server) client(ctx context.Context, conn net.Conn) *client {
 	c := &client{
 		server: s,
 		conn:   conn,
-		IP:     conn.RemoteAddr().String(),
 		Status: Connecting,
-		in:     make(chan packets.Packet, 8),
-		out:    make(chan packets.Packet, 8),
+		in:     make(chan packets.Packet, 16),
+		out:    make(chan packets.Packet, 16),
+		prop:   new(clientProp),
 	}
 	c.ctx, c.cancel = context.WithCancel(ctx)
 	return c
@@ -65,12 +67,18 @@ func (s *Server) tcp() {
 		log.Errorf("tcp: %v", err)
 		return
 	}
-	defer ln.Close()
+	var pln net.Listener
+	if lc.ProxyProtocol {
+		pln = &proxyproto.Listener{Listener: ln}
+	} else {
+		pln = ln
+	}
+	defer pln.Close()
 	var ctx context.Context
 	ctx, s.cancelTcp = context.WithCancel(s.ctx)
 	go func() {
 		for {
-			conn, err := ln.Accept()
+			conn, err := pln.Accept()
 			if err != nil {
 				continue
 			}
@@ -109,12 +117,18 @@ func (s *Server) ssl() {
 		log.Errorf("ssl: %v", err)
 		return
 	}
-	defer ln.Close()
+	var pln net.Listener
+	if lc.ProxyProtocol {
+		pln = &proxyproto.Listener{Listener: ln}
+	} else {
+		pln = ln
+	}
+	defer pln.Close()
 	var ctx context.Context
 	ctx, s.cancelSsl = context.WithCancel(s.ctx)
 	go func() {
 		for {
-			conn, err := ln.Accept()
+			conn, err := pln.Accept()
 			if err != nil {
 				continue
 			}
@@ -152,8 +166,23 @@ func (s *Server) ws() {
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
 	}
+	ln, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		log.Errorf("ws: %v", err)
+		return
+	}
+	var pln net.Listener
+	if lc.ProxyProtocol {
+		pln = &proxyproto.Listener{
+			Listener:          ln,
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+	} else {
+		pln = ln
+	}
+	defer pln.Close()
 	go func() {
-		if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		if err := server.Serve(pln); err != nil && err != http.ErrServerClosed {
 			log.Errorf("ws: %v", err)
 		}
 	}()
@@ -185,8 +214,23 @@ func (s *Server) wss() {
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
 	}
+	ln, err := net.Listen("tcp", server.Addr)
+	if err != nil {
+		log.Errorf("wss: %v", err)
+		return
+	}
+	var pln net.Listener
+	if lc.ProxyProtocol {
+		pln = &proxyproto.Listener{
+			Listener:          ln,
+			ReadHeaderTimeout: 10 * time.Second,
+		}
+	} else {
+		pln = ln
+	}
+	defer pln.Close()
 	go func() {
-		if err := server.ListenAndServeTLS(lc.TLSCert, lc.TLSKey); err != nil && err != http.ErrServerClosed {
+		if err := server.ServeTLS(pln, lc.TLSCert, lc.TLSKey); err != nil && err != http.ErrServerClosed {
 			log.Errorf("wss: %v", err)
 		}
 	}()
@@ -206,8 +250,9 @@ func (s *Server) Start() {
 	go s.ws()
 	go s.wss()
 	go s.signal()
+	go s.pprof()
 	<-s.ctx.Done()
-	time.Sleep(3 * time.Second)
+	//time.Sleep(3 * time.Second)
 	log.Info("gomq: stopped")
 }
 
@@ -232,6 +277,18 @@ func (s *Server) Reload() {
 	go s.ssl()
 	go s.ws()
 	go s.wss()
+}
+
+// Pprof Listen
+func (s *Server) pprof() {
+	go func() {
+		if err := http.ListenAndServe(":6060", nil); err != nil && err != http.ErrServerClosed {
+			log.Errorf("pprof: %v", err)
+		}
+	}()
+	log.Info("pprof: listening")
+	<-s.ctx.Done()
+	log.Info("pprof: closed")
 }
 
 // Signal process
