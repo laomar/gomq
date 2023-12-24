@@ -3,9 +3,9 @@ package server
 import (
 	"context"
 	"fmt"
-	. "gomq/config"
-	"gomq/log"
-	"gomq/packets"
+	. "github.com/laomar/gomq/config"
+	"github.com/laomar/gomq/log"
+	"github.com/laomar/gomq/packets"
 	"math"
 	"net"
 	"time"
@@ -74,7 +74,7 @@ func (c *client) writePacket(p packets.Packet) error {
 func (c *client) readLoop() {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Errorf("Client read recover: %v", r)
+			log.Errorf("client read recover: %v", r)
 		}
 		close(c.in)
 	}()
@@ -88,7 +88,7 @@ func (c *client) readLoop() {
 			}
 			p, err := c.readPacket()
 			if err != nil {
-				log.Debugf("Client read: %v", err)
+				log.Debugf("client read: %v", err)
 				c.close()
 				return
 			}
@@ -100,7 +100,7 @@ func (c *client) readLoop() {
 func (c *client) writeLoop() {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Errorf("Client write recover: %v", r)
+			log.Errorf("client write recover: %v", r)
 		}
 	}()
 	for {
@@ -110,7 +110,7 @@ func (c *client) writeLoop() {
 		case out := <-c.out:
 			err := c.writePacket(out)
 			if err != nil {
-				log.Debugf("Client write: %v", err)
+				log.Debugf("client write: %v %v", err, c.ID)
 				c.close()
 				return
 			}
@@ -338,7 +338,6 @@ func (c *client) auth(pa *packets.Auth) {
 
 // Handle ping
 func (c *client) pingreq() {
-	fmt.Println("ping")
 	resp := &packets.Pingresp{}
 	_ = resp.Pack(c.conn)
 }

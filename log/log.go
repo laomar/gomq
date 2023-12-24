@@ -2,10 +2,10 @@ package log
 
 import (
 	"github.com/gin-gonic/gin"
+	. "github.com/laomar/gomq/config"
 	"github.com/natefinch/lumberjack"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	. "gomq/config"
 	"os"
 	"strings"
 	"time"
