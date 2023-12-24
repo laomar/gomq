@@ -1,0 +1,60 @@
+pidfile = "./data/gomq.pid"
+datadir = "./data"
+
+[tcp]
+enable = true
+port = 1883
+proxy_protocol = true
+
+[ssl]
+enable = true
+port = 8883
+proxy_protocol = true
+tlscert = "./data/cert/gomq.crt"
+tlskey = "./data/cert/gomq.key"
+
+[ws]
+enable = true
+port = 8083
+proxy_protocol = true
+path = "/mqtt"
+
+[wss]
+enable = true
+port = 8084
+proxy_protocol = true
+path = "/mqtt"
+tlscert = "./data/cert/gomq.crt"
+tlskey = "./data/cert/gomq.key"
+
+[api]
+port = 8421
+
+[mqtt]
+retain_available = true
+max_topic_alias = 65535
+session_expiry_interval = 60
+max_receive = 128
+max_inflight = 32
+server_keep_alive = 0
+max_packet_size = 10240
+max_qos = 2
+wildcard_sub = true
+sub_id = true
+shared_sub = true
+
+[node]
+
+
+[cluster]
+name = "gomq@127.0.0.1"
+port = 8422
+discovery = "static"
+nodes = ["gomq1@127.0.0.1","gomq2@127.0.0.1"]
+
+[log]
+level = "debug"
+format = "json"
+maxage = 7
+maxsize = 10
+maxcount = 10
