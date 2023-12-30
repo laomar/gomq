@@ -48,6 +48,7 @@ const (
 	RefusedServerUnavailable     = 0x03
 	RefusedBadUsernameOrPassword = 0x04
 	RefusedNotAuthorised         = 0x05
+	SubFail                      = 0x80
 )
 
 // V5 reason code

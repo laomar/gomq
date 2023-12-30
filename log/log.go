@@ -6,6 +6,7 @@ import (
 	"github.com/natefinch/lumberjack"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
+	"io"
 	"os"
 	"strings"
 	"time"
@@ -15,43 +16,45 @@ var log *zap.SugaredLogger
 
 // Init log
 func Init() {
-	encoderConfig := zap.NewProductionEncoderConfig()
-	if Cfg.Env == "dev" {
-		encoderConfig = zap.NewDevelopmentEncoderConfig()
+	var iwr io.Writer
+	iwr = os.Stdout
+	if Cfg.Env != "dev" {
+		iwr = file()
 	}
-	encoderConfig.TimeKey = "time"
-	encoderConfig.EncodeTime = func(t time.Time, e zapcore.PrimitiveArrayEncoder) {
+	core := zapcore.NewCore(encoder(), zapcore.AddSync(iwr), level())
+	logger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
+	log = logger.Sugar()
+}
+
+func encoder() zapcore.Encoder {
+	c := zap.NewProductionEncoderConfig()
+	if Cfg.Env == "dev" {
+		c = zap.NewDevelopmentEncoderConfig()
+	}
+	c.TimeKey = "time"
+	c.EncodeTime = func(t time.Time, e zapcore.PrimitiveArrayEncoder) {
 		e.AppendString(t.Format("2006-01-02 15:04:05.000"))
 	}
-	encoderConfig.EncodeCaller = func(c zapcore.EntryCaller, e zapcore.PrimitiveArrayEncoder) {
+	c.EncodeCaller = func(c zapcore.EntryCaller, e zapcore.PrimitiveArrayEncoder) {
 		e.AppendString(c.TrimmedPath())
 	}
 
-	encoder := zapcore.NewJSONEncoder(encoderConfig)
+	e := zapcore.NewJSONEncoder(c)
 	if strings.ToLower(Cfg.Log.Format) == "text" || Cfg.Env == "dev" {
-		encoder = zapcore.NewConsoleEncoder(encoderConfig)
+		e = zapcore.NewConsoleEncoder(c)
 	}
+	return e
+}
 
-	var writer zapcore.WriteSyncer
-	if Cfg.Env == "dev" {
-		writer = zapcore.AddSync(os.Stdout)
-	} else {
-		file := &lumberjack.Logger{
-			Filename:   Cfg.DataDir + "/log/gomq.log",
-			MaxAge:     Cfg.Log.MaxAge,
-			MaxSize:    Cfg.Log.MaxSize,
-			MaxBackups: Cfg.Log.MaxCount,
-			LocalTime:  true,
-			Compress:   false,
-		}
-		defer file.Close()
-		writer = zapcore.AddSync(file)
+func file() *lumberjack.Logger {
+	return &lumberjack.Logger{
+		Filename:   Cfg.DataDir + "/log/gomq.log",
+		MaxAge:     Cfg.Log.MaxAge,
+		MaxSize:    Cfg.Log.MaxSize,
+		MaxBackups: Cfg.Log.MaxCount,
+		LocalTime:  true,
+		Compress:   false,
 	}
-
-	core := zapcore.NewCore(encoder, writer, level())
-	logger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
-	defer logger.Sync()
-	log = logger.Sugar()
 }
 
 // Get log level

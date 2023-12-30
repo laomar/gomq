@@ -7,6 +7,7 @@ import (
 	. "github.com/laomar/gomq/config"
 	"github.com/laomar/gomq/log"
 	"github.com/laomar/gomq/packets"
+	"github.com/laomar/gomq/store/subscription"
 	"github.com/pires/go-proxyproto"
 	"github.com/spf13/cobra"
 	"golang.org/x/net/websocket"
@@ -26,8 +27,8 @@ import (
 type Server struct {
 	ctx       context.Context
 	cancel    context.CancelFunc
-	m         sync.RWMutex
 	clients   *sync.Map
+	subStore  subscription.Store
 	cancelTcp context.CancelFunc
 	cancelSsl context.CancelFunc
 	cancelWs  context.CancelFunc
@@ -40,6 +41,17 @@ func New() *Server {
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	return s
+}
+
+func (s *Server) Init() error {
+	switch Cfg.Store.Type {
+	case "disk":
+		s.subStore = subscription.NewDiskStore()
+	default:
+		s.subStore = subscription.NewRamStore()
+	}
+	s.subStore.Init([]string{"test"})
+	return nil
 }
 
 // Client init
@@ -78,22 +90,22 @@ func (s *Server) tcp() {
 	ctx, s.cancelTcp = context.WithCancel(s.ctx)
 	go func() {
 		for {
-			conn, err := pln.Accept()
-			if err != nil {
-				continue
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				conn, err := pln.Accept()
+				if err != nil {
+					continue
+				}
+				c := s.client(ctx, conn)
+				go c.serve()
 			}
-			c := s.client(ctx, conn)
-			go c.serve()
 		}
 	}()
 	log.Infof("tcp: listening %s", lc.Address+":"+lc.Port)
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("tcp: closed")
-			return
-		}
-	}
+	<-ctx.Done()
+	log.Info("tcp: closed")
 }
 
 // SSL TCP server
@@ -128,22 +140,22 @@ func (s *Server) ssl() {
 	ctx, s.cancelSsl = context.WithCancel(s.ctx)
 	go func() {
 		for {
-			conn, err := pln.Accept()
-			if err != nil {
-				continue
+			select {
+			case <-ctx.Done():
+				return
+			default:
+				conn, err := pln.Accept()
+				if err != nil {
+					continue
+				}
+				c := s.client(ctx, conn)
+				go c.serve()
 			}
-			c := s.client(ctx, conn)
-			go c.serve()
 		}
 	}()
 	log.Infof("ssl: listening %s", lc.Address+":"+lc.Port)
-	for {
-		select {
-		case <-ctx.Done():
-			log.Info("ssl: closed")
-			return
-		}
-	}
+	<-ctx.Done()
+	log.Info("ssl: closed")
 }
 
 // Websocket server
@@ -272,7 +284,7 @@ func (s *Server) Reload() {
 	s.cancelSsl()
 	s.cancelWs()
 	s.cancelWss()
-	time.Sleep(3 * time.Second)
+	time.Sleep(1 * time.Second)
 	go s.tcp()
 	go s.ssl()
 	go s.ws()
@@ -380,6 +392,9 @@ func StartCmd() *cobra.Command {
 				log.Fatalf("gomq start: %v", err)
 			}
 			server := New()
+			if err := server.Init(); err != nil {
+				log.Fatalf("gomq start: %v", err)
+			}
 			server.Start()
 		},
 	}

@@ -3,14 +3,14 @@ package config
 import (
 	"fmt"
 	"github.com/spf13/viper"
-	"log"
+	. "log"
 	"os"
 	"path"
 	"path/filepath"
 	"strings"
 )
 
-type Listener struct {
+type listener struct {
 	Type          string
 	Enable        bool
 	Address       string
@@ -21,14 +21,14 @@ type Listener struct {
 	TLSCert       string
 	TLSKey        string
 }
-type Log struct {
+type log struct {
 	Level    string
 	Format   string
 	MaxAge   int
 	MaxSize  int
 	MaxCount int
 }
-type Mqtt struct {
+type mqtt struct {
 	RetainAvailable       bool   `mapstructure:"retain_available"`
 	TopicAliasMaximum     uint16 `mapstructure:"max_topic_alias"`
 	SessionExpiryInterval uint32 `mapstructure:"session_expiry_interval"`
@@ -41,13 +41,18 @@ type Mqtt struct {
 	SharedSub             bool   `mapstructure:"shared_sub"`
 	MaxInflight           uint16 `mapstructure:"max_inflight"`
 }
+type store struct {
+	Type string
+}
 type Config struct {
 	Env       string
+	NodeName  string
 	DataDir   string
 	PidFile   string
-	Listeners map[string]Listener
-	Log       Log
-	Mqtt      Mqtt
+	Store     store
+	Listeners map[string]listener
+	Log       log
+	Mqtt      mqtt
 }
 
 var Cfg *Config
@@ -77,19 +82,19 @@ func ParseConfig() {
 	viper.AddConfigPath("./config")
 	viper.SetConfigName("gomq")
 	if err := viper.ReadInConfig(); err != nil {
-		log.Fatal(err)
+		Fatal(err)
 	}
 
 	// config value
 	datadir := abs(viper.GetString("datadir"))
 	if _, err := os.Stat(datadir); os.IsNotExist(err) {
 		if err := os.MkdirAll(datadir, 0755); err != nil {
-			log.Fatal(err)
+			Fatal(err)
 		}
 	}
-	lns := make(map[string]Listener)
+	lns := make(map[string]listener)
 	for _, t := range []string{"tcp", "ssl", "ws", "wss"} {
-		ln := Listener{}
+		ln := listener{}
 		_ = viper.UnmarshalKey(t, &ln)
 		if t == "ssl" || t == "wss" {
 			ln.CACert = abs(viper.GetString(t + ".cacert"))
@@ -105,8 +110,8 @@ func ParseConfig() {
 		PidFile:   abs(viper.GetString("pidfile")),
 		Listeners: lns,
 	}
+	_ = viper.UnmarshalKey("store", &Cfg.Store)
 	_ = viper.UnmarshalKey("log", &Cfg.Log)
 	_ = viper.UnmarshalKey("mqtt", &Cfg.Mqtt)
-
-	fmt.Println(Cfg.Listeners["tcp"])
+	fmt.Println(Cfg.Store)
 }

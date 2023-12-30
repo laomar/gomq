@@ -1,10 +1,11 @@
-pidfile = "./data/gomq.pid"
+nodename = "gomq"
 datadir = "./data"
+pidfile = "./data/gomq.pid"
 
 [tcp]
 enable = true
 port = 1883
-proxy_protocol = true
+proxy_protocol = false
 
 [ssl]
 enable = true
@@ -27,6 +28,9 @@ path = "/mqtt"
 tlscert = "./data/cert/gomq.crt"
 tlskey = "./data/cert/gomq.key"
 
+[store]
+type = "ram"
+
 [api]
 port = 8421
 
@@ -43,14 +47,10 @@ wildcard_sub = true
 sub_id = true
 shared_sub = true
 
-[node]
-
-
 [cluster]
-name = "gomq@127.0.0.1"
 port = 8422
 discovery = "static"
-nodes = ["gomq1@127.0.0.1","gomq2@127.0.0.1"]
+nodes = ["192.168.0.6:8422","192.168.0.7:8422"]
 
 [log]
 level = "debug"

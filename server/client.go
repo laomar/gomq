@@ -2,10 +2,10 @@ package server
 
 import (
 	"context"
-	"fmt"
 	. "github.com/laomar/gomq/config"
 	"github.com/laomar/gomq/log"
 	"github.com/laomar/gomq/packets"
+	"github.com/laomar/gomq/store/subscription"
 	"math"
 	"net"
 	"time"
@@ -74,7 +74,7 @@ func (c *client) writePacket(p packets.Packet) error {
 func (c *client) readLoop() {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Errorf("client read recover: %v", r)
+			log.Errorf("client read recover: %v %v", c.ID, r)
 		}
 		close(c.in)
 	}()
@@ -100,7 +100,7 @@ func (c *client) readLoop() {
 func (c *client) writeLoop() {
 	defer func() {
 		if r := recover(); r != nil {
-			log.Errorf("client write recover: %v", r)
+			log.Errorf("client write recover: %v %v", c.ID, r)
 		}
 	}()
 	for {
@@ -119,6 +119,11 @@ func (c *client) writeLoop() {
 }
 
 func (c *client) handleLoop() {
+	//defer func() {
+	//	if r := recover(); r != nil {
+	//		log.Errorf("client handle recover: %v %v", c.ID, r)
+	//	}
+	//}()
 	for in := range c.in {
 		switch p := in.(type) {
 		case *packets.Disconnect:
@@ -145,13 +150,14 @@ func (c *client) close() {
 	if c.conn != nil {
 		c.conn.Close()
 	}
-	count := 0
-	c.server.clients.Range(func(id, c any) bool {
-		count++
-		return true
-	})
+	c.server.subStore.UnsubscribeAll(c.ID)
+	//count := 0
+	//c.server.clients.Range(func(id, c any) bool {
+	//	count++
+	//	return true
+	//})
 	//fmt.Println(count)
-	c.server.clients.Delete(c.ID)
+	//c.server.clients.Delete(c.ID)
 }
 
 // Handle connect
@@ -162,6 +168,7 @@ func (c *client) connect() bool {
 		switch p := in.(type) {
 		case *packets.Connect:
 			pc = p
+			c.Version = pc.Version
 			if len(pc.ClientID) == 0 {
 				code = packets.ClientIdentifierNotValid
 				break
@@ -172,8 +179,6 @@ func (c *client) connect() bool {
 			code = packets.MalformedPacket
 		}
 
-		c.Version = pc.Version
-
 		// continue authentication
 		if code == packets.ContinueAuthentication {
 			auth := &packets.Auth{
@@ -182,17 +187,18 @@ func (c *client) connect() bool {
 					AuthMethod: pc.Properties.AuthMethod,
 				},
 			}
-			c.out <- auth
+			_ = c.writePacket(auth)
 			continue
 		}
 
-		// connect fail
 		ack := &packets.Connack{
-			Version:    pc.Version,
+			Version:    c.Version,
 			ReasonCode: code,
 		}
+
+		// connect fail
 		if code != packets.Success {
-			c.out <- ack
+			_ = c.writePacket(ack)
 			return false
 		}
 
@@ -251,7 +257,6 @@ func (c *client) connect() bool {
 
 		err := c.writePacket(ack)
 		if err == nil {
-			fmt.Println(*c.prop)
 			log.Debugf("connect: connected %s", c.ID)
 			return true
 		}
@@ -281,7 +286,7 @@ func (c *client) disconnect(pd *packets.Disconnect) {
 
 // Handle publish
 func (c *client) publish(pp *packets.Publish) {
-	fmt.Println(string(pp.Payload))
+	//fmt.Println(string(pp.Payload))
 	switch pp.FixHeader.Qos {
 	case packets.Qos0:
 	case packets.Qos1:
@@ -316,19 +321,37 @@ func (c *client) subscribe(ps *packets.Subscribe) {
 	ack := &packets.Suback{
 		Version:  c.Version,
 		PacketID: ps.PacketID,
-		Payload:  []byte{packets.Success},
+		Payload:  make([]byte, len(ps.Topics)),
 	}
-	_ = ack.Pack(c.conn)
+
+	for _, topic := range ps.Topics {
+		shareName, topicName := subscription.SplitTopic(topic.Name)
+		sub := &subscription.Subscription{
+			Topic:             topicName,
+			ShareName:         shareName,
+			RetainHandling:    topic.RetainHandling,
+			RetainAsPublished: topic.RetainAsPublished,
+			NoLocal:           topic.NoLocal,
+			Qos:               topic.Qos,
+			SubID:             0,
+		}
+		c.server.subStore.Subscribe(c.ID, sub)
+	}
+
+	_ = c.writePacket(ack)
 }
 
 // Handle Unsubscribe
 func (c *client) unsubscribe(pu *packets.Unsubscribe) {
+	for _, topic := range pu.Topics {
+		c.server.subStore.Unsubscribe(c.ID, topic)
+	}
 	ack := &packets.Unsuback{
 		Version:  c.Version,
 		PacketID: pu.PacketID,
 		Payload:  []byte{packets.Success},
 	}
-	_ = ack.Pack(c.conn)
+	_ = c.writePacket(ack)
 }
 
 // Handle auth
