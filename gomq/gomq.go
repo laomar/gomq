@@ -1,4 +1,4 @@
-package server
+package gomq
 
 import (
 	"context"
@@ -6,7 +6,7 @@ import (
 	"fmt"
 	. "github.com/laomar/gomq/config"
 	"github.com/laomar/gomq/log"
-	"github.com/laomar/gomq/packets"
+	"github.com/laomar/gomq/pkg/packets"
 	"github.com/laomar/gomq/store/subscription"
 	"github.com/pires/go-proxyproto"
 	"github.com/spf13/cobra"
@@ -55,7 +55,7 @@ func (s *Server) Init() error {
 }
 
 // Client init
-func (s *Server) client(ctx context.Context, conn net.Conn) *client {
+func (s *Server) NewClient(ctx context.Context, conn net.Conn) *client {
 	c := &client{
 		server: s,
 		conn:   conn,
@@ -69,7 +69,7 @@ func (s *Server) client(ctx context.Context, conn net.Conn) *client {
 }
 
 // TCP server
-func (s *Server) tcp() {
+func (s *Server) Tcp() {
 	lc, ok := Cfg.Listeners["tcp"]
 	if !ok || !lc.Enable {
 		return
@@ -98,7 +98,7 @@ func (s *Server) tcp() {
 				if err != nil {
 					continue
 				}
-				c := s.client(ctx, conn)
+				c := s.NewClient(ctx, conn)
 				go c.serve()
 			}
 		}
@@ -148,7 +148,7 @@ func (s *Server) ssl() {
 				if err != nil {
 					continue
 				}
-				c := s.client(ctx, conn)
+				c := s.NewClient(ctx, conn)
 				go c.serve()
 			}
 		}
@@ -169,7 +169,7 @@ func (s *Server) ws() {
 	router := http.NewServeMux()
 	router.Handle(lc.Path, websocket.Handler(func(conn *websocket.Conn) {
 		conn.PayloadType = websocket.BinaryFrame
-		c := s.client(ctx, conn)
+		c := s.NewClient(ctx, conn)
 		c.serve()
 	}))
 	server := &http.Server{
@@ -217,7 +217,7 @@ func (s *Server) wss() {
 	router := http.NewServeMux()
 	router.Handle(lc.Path, websocket.Handler(func(conn *websocket.Conn) {
 		conn.PayloadType = websocket.BinaryFrame
-		c := s.client(ctx, conn)
+		c := s.NewClient(ctx, conn)
 		c.serve()
 	}))
 	server := &http.Server{
@@ -256,22 +256,36 @@ func (s *Server) wss() {
 
 // Start server
 func (s *Server) Start() {
+	stop := make(chan os.Signal)
+	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
+	reload := make(chan os.Signal)
+	signal.Notify(reload, syscall.SIGHUP)
+
 	log.Info("gomq: starting...")
-	go s.tcp()
+	go s.Tcp()
 	go s.ssl()
 	go s.ws()
 	go s.wss()
-	go s.signal()
-	go s.pprof()
-	<-s.ctx.Done()
-	//time.Sleep(3 * time.Second)
-	log.Info("gomq: stopped")
+	go s.Pprof()
+
+	for {
+		select {
+		case <-s.ctx.Done():
+			time.Sleep(time.Second)
+			log.Info("gomq: stopped")
+			return
+		case <-stop:
+			os.Remove(Cfg.PidFile)
+			s.Stop()
+		case <-reload:
+			s.Reload()
+		}
+	}
 }
 
 // Stop server
 func (s *Server) Stop() {
 	defer s.cancel()
-	os.Remove(Cfg.PidFile)
 }
 
 // Reload server
@@ -285,14 +299,14 @@ func (s *Server) Reload() {
 	s.cancelWs()
 	s.cancelWss()
 	time.Sleep(1 * time.Second)
-	go s.tcp()
+	go s.Tcp()
 	go s.ssl()
 	go s.ws()
 	go s.wss()
 }
 
 // Pprof Listen
-func (s *Server) pprof() {
+func (s *Server) Pprof() {
 	go func() {
 		if err := http.ListenAndServe(":6060", nil); err != nil && err != http.ErrServerClosed {
 			log.Errorf("pprof: %v", err)
@@ -301,22 +315,6 @@ func (s *Server) pprof() {
 	log.Info("pprof: listening")
 	<-s.ctx.Done()
 	log.Info("pprof: closed")
-}
-
-// Signal process
-func (s *Server) signal() {
-	stop := make(chan os.Signal)
-	signal.Notify(stop, os.Interrupt, syscall.SIGTERM, syscall.SIGQUIT)
-	reload := make(chan os.Signal)
-	signal.Notify(reload, syscall.SIGHUP)
-	for {
-		select {
-		case <-stop:
-			s.Stop()
-		case <-reload:
-			s.Reload()
-		}
-	}
 }
 
 // ReloadCmd create reload command
@@ -368,7 +366,7 @@ func StopCmd() *cobra.Command {
 				log.Errorf("gomq stop: %v", err)
 				return
 			}
-			if err := p.Signal(os.Interrupt); err != nil {
+			if err := p.Signal(syscall.SIGINT); err != nil {
 				log.Errorf("gomq stop: %v", err)
 			}
 		},

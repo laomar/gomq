@@ -6,8 +6,8 @@ import (
 	"github.com/natefinch/lumberjack"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
-	"io"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 )
@@ -16,12 +16,13 @@ var log *zap.SugaredLogger
 
 // Init log
 func Init() {
-	var iwr io.Writer
-	iwr = os.Stdout
-	if Cfg.Env != "dev" {
-		iwr = file()
+	ws := make([]zapcore.WriteSyncer, 1)
+	ws[0] = zapcore.AddSync(file())
+	if Cfg.Env == "dev" {
+		ws = append(ws, os.Stdout)
 	}
-	core := zapcore.NewCore(encoder(), zapcore.AddSync(iwr), level())
+
+	core := zapcore.NewCore(encoder(), zapcore.NewMultiWriteSyncer(ws...), level())
 	logger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
 	log = logger.Sugar()
 }
@@ -48,7 +49,7 @@ func encoder() zapcore.Encoder {
 
 func file() *lumberjack.Logger {
 	return &lumberjack.Logger{
-		Filename:   Cfg.DataDir + "/log/gomq.log",
+		Filename:   Cfg.DataDir + "/log/" + filepath.Base(os.Args[0]) + ".log",
 		MaxAge:     Cfg.Log.MaxAge,
 		MaxSize:    Cfg.Log.MaxSize,
 		MaxBackups: Cfg.Log.MaxCount,

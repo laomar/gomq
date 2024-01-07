@@ -3,4 +3,5 @@
 .vscode
 .fleet
 node_modules
-app
+app/
+dist/

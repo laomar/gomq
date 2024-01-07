@@ -4,12 +4,15 @@ import (
 	"fmt"
 	"strings"
 	"sync"
+	"sync/atomic"
 )
 
 type ramStore struct {
 	sync.RWMutex
-	topic    string
+	name     string
 	parent   *ramStore
+	child    sync.Map
+	childnum int32
 	children map[string]*ramStore
 	subs     map[string]*Subscription
 	shares   map[string]map[string]*Subscription
@@ -24,33 +27,44 @@ func NewRamStore() *ramStore {
 }
 
 func (r *ramStore) Init(cids []string) error {
+	fmt.Println(r.childnum)
 	return nil
 }
 
 func (r *ramStore) print() {
 	if r.parent == nil {
 		fmt.Println()
+	} else {
+		fmt.Println(r.name, r.childnum, r.subs)
 	}
-	fmt.Println(*r)
-	for _, c := range r.children {
-		c.print()
-	}
+	//for _, c := range r.children {
+	//	c.Print()
+	//}
+	r.child.Range(func(_, c any) bool {
+		c.(*ramStore).print()
+		return true
+	})
 }
 
 func (r *ramStore) Subscribe(cid string, sub *Subscription) error {
-	r.Lock()
 	defer r.Unlock()
-	topics := strings.Split(sub.Topic, "/")
+	names := strings.Split(sub.Topic, "/")
 	node := r
-	for _, topic := range topics {
-		if _, ok := node.children[topic]; !ok {
+	for _, name := range names {
+		if _, ok := node.child.Load(name); !ok {
+			//if _, ok := node.children[name]; !ok {
 			child := NewRamStore()
 			child.parent = node
-			child.topic = topic
-			node.children[topic] = child
+			child.name = name
+			//node.children[name] = child
+			node.child.Store(name, child)
+			atomic.AddInt32(&node.childnum, 1)
 		}
-		node = node.children[topic]
+		//node = node.children[name]
+		child, _ := node.child.Load(name)
+		node = child.(*ramStore)
 	}
+	r.Lock()
 	if sub.ShareName != "" {
 		if _, ok := node.shares[sub.ShareName]; !ok {
 			node.shares[sub.ShareName] = make(map[string]*Subscription)
@@ -59,32 +73,37 @@ func (r *ramStore) Subscribe(cid string, sub *Subscription) error {
 	} else {
 		node.subs[cid] = sub
 	}
-	//r.print()
 	return nil
 }
 
 func (r *ramStore) delete() {
-	if r.parent == nil {
+	if r.parent == nil || r.childnum > 0 {
 		return
 	}
-	if len(r.subs) == 0 && len(r.shares) == 0 && len(r.children) == 0 {
-		delete(r.parent.children, r.topic)
-		r.parent.delete()
+	if len(r.subs) == 0 && len(r.shares) == 0 {
+		//delete(r.parent.children, r.name)
+		r.parent.child.Delete(r.name)
+		if atomic.AddInt32(&r.parent.childnum, -1) == 0 {
+			r.parent.delete()
+		}
 	}
 }
 
 func (r *ramStore) Unsubscribe(cid string, topic string) error {
-	r.Lock()
 	defer r.Unlock()
 	shareName, topicName := SplitTopic(topic)
-	topics := strings.Split(topicName, "/")
+	names := strings.Split(topicName, "/")
 	node := r
-	for _, topic := range topics {
-		if _, ok := node.children[topic]; !ok {
+	for _, name := range names {
+		if _, ok := node.child.Load(name); !ok {
+			//if _, ok := node.children[name]; !ok {
 			return nil
 		}
-		node = node.children[topic]
+		//node = node.children[name]
+		child, _ := node.child.Load(name)
+		node = child.(*ramStore)
 	}
+	r.Lock()
 	if shareName != "" {
 		if share, ok := node.shares[shareName]; ok {
 			delete(share, cid)
@@ -96,33 +115,47 @@ func (r *ramStore) Unsubscribe(cid string, topic string) error {
 		delete(node.subs, cid)
 	}
 	node.delete()
-	//r.print()
+	r.print()
 	return nil
 }
 
 func (r *ramStore) unsubscribeAll(cid string) {
-	for _, c := range r.children {
-		delete(c.subs, cid)
-		for name, share := range c.shares {
+	//for _, c := range r.children {
+	//	delete(c.subs, cid)
+	//	for name, share := range c.shares {
+	//		delete(share, cid)
+	//		if len(share) == 0 {
+	//			delete(c.shares, name)
+	//		}
+	//	}
+	//	if len(c.children) > 0 {
+	//		c.unsubscribeAll(cid)
+	//	} else {
+	//		c.delete()
+	//	}
+	//}
+	r.child.Range(func(_, c any) bool {
+		child := c.(*ramStore)
+		delete(child.subs, cid)
+		for name, share := range child.shares {
 			delete(share, cid)
 			if len(share) == 0 {
-				delete(c.shares, name)
+				delete(child.shares, name)
 			}
 		}
-		if len(c.children) > 0 {
-			c.unsubscribeAll(cid)
+		if child.childnum > 0 {
+			child.unsubscribeAll(cid)
 		} else {
-			c.delete()
+			child.delete()
 		}
-
-	}
+		return true
+	})
 }
 
 func (r *ramStore) UnsubscribeAll(cid string) error {
 	r.Lock()
 	defer r.Unlock()
 	r.unsubscribeAll(cid)
-	r.print()
 	return nil
 }
 

@@ -1,10 +1,10 @@
-package server
+package gomq
 
 import (
 	"context"
 	. "github.com/laomar/gomq/config"
 	"github.com/laomar/gomq/log"
-	"github.com/laomar/gomq/packets"
+	"github.com/laomar/gomq/pkg/packets"
 	"github.com/laomar/gomq/store/subscription"
 	"math"
 	"net"

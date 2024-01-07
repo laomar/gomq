@@ -1,6 +1,5 @@
 nodename = "gomq"
 datadir = "./data"
-pidfile = "./data/gomq.pid"
 
 [tcp]
 enable = true
@@ -11,8 +10,8 @@ proxy_protocol = false
 enable = true
 port = 8883
 proxy_protocol = true
-tlscert = "./data/cert/gomq.crt"
-tlskey = "./data/cert/gomq.key"
+tlscert = "./cert/gomq.crt"
+tlskey = "./cert/gomq.key"
 
 [ws]
 enable = true
@@ -25,8 +24,8 @@ enable = true
 port = 8084
 proxy_protocol = true
 path = "/mqtt"
-tlscert = "./data/cert/gomq.crt"
-tlskey = "./data/cert/gomq.key"
+tlscert = "./cert/gomq.crt"
+tlskey = "./cert/gomq.key"
 
 [store]
 type = "ram"
@@ -53,7 +52,7 @@ discovery = "static"
 nodes = ["192.168.0.6:8422","192.168.0.7:8422"]
 
 [log]
-level = "debug"
+level = "info"
 format = "json"
 maxage = 7
 maxsize = 10

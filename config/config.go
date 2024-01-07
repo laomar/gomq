@@ -107,7 +107,7 @@ func ParseConfig() {
 	Cfg = &Config{
 		Env:       viper.GetString("env"),
 		DataDir:   datadir,
-		PidFile:   abs(viper.GetString("pidfile")),
+		PidFile:   datadir + "/" + filepath.Base(os.Args[0]) + ".pid",
 		Listeners: lns,
 	}
 	_ = viper.UnmarshalKey("store", &Cfg.Store)

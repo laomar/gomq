@@ -2,8 +2,8 @@ package main
 
 import (
 	. "github.com/laomar/gomq/config"
+	. "github.com/laomar/gomq/gomq"
 	"github.com/laomar/gomq/log"
-	. "github.com/laomar/gomq/server"
 	"github.com/spf13/cobra"
 )
 

@@ -18,6 +18,7 @@ type Store interface {
 	Unsubscribe(cid string, topic string) error
 	UnsubscribeAll(cid string) error
 	Close() error
+	//Print()
 }
 
 func SplitTopic(topic string) (string, string) {

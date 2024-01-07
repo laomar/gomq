@@ -52,3 +52,6 @@ func (r *diskStore) UnsubscribeAll(cid string) error {
 func (r *diskStore) Close() error {
 	return nil
 }
+
+func (r *diskStore) Print() {
+}
