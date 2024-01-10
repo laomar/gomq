@@ -1,11 +1,10 @@
-package gomq
+package server
 
 import (
 	"context"
 	. "github.com/laomar/gomq/config"
 	"github.com/laomar/gomq/log"
 	"github.com/laomar/gomq/pkg/packets"
-	"github.com/laomar/gomq/store/subscription"
 	"math"
 	"net"
 	"time"
@@ -45,8 +44,8 @@ type client struct {
 
 func (c *client) serve() {
 	go c.readLoop()
-	go c.writeLoop()
 	if c.connect() {
+		go c.writeLoop()
 		go c.handleLoop()
 	}
 	<-c.ctx.Done()
@@ -119,11 +118,11 @@ func (c *client) writeLoop() {
 }
 
 func (c *client) handleLoop() {
-	//defer func() {
-	//	if r := recover(); r != nil {
-	//		log.Errorf("client handle recover: %v %v", c.ID, r)
-	//	}
-	//}()
+	defer func() {
+		if r := recover(); r != nil {
+			log.Errorf("client handle recover: %v %v", c.ID, r)
+		}
+	}()
 	for in := range c.in {
 		switch p := in.(type) {
 		case *packets.Disconnect:
@@ -150,14 +149,7 @@ func (c *client) close() {
 	if c.conn != nil {
 		c.conn.Close()
 	}
-	c.server.subStore.UnsubscribeAll(c.ID)
-	//count := 0
-	//c.server.clients.Range(func(id, c any) bool {
-	//	count++
-	//	return true
-	//})
-	//fmt.Println(count)
-	//c.server.clients.Delete(c.ID)
+	c.server.topicStore.UnsubscribeAll(c.ID)
 }
 
 // Handle connect
@@ -321,21 +313,11 @@ func (c *client) subscribe(ps *packets.Subscribe) {
 	ack := &packets.Suback{
 		Version:  c.Version,
 		PacketID: ps.PacketID,
-		Payload:  make([]byte, len(ps.Topics)),
+		Payload:  make([]byte, len(ps.Subscriptions)),
 	}
 
-	for _, topic := range ps.Topics {
-		shareName, topicName := subscription.SplitTopic(topic.Name)
-		sub := &subscription.Subscription{
-			Topic:             topicName,
-			ShareName:         shareName,
-			RetainHandling:    topic.RetainHandling,
-			RetainAsPublished: topic.RetainAsPublished,
-			NoLocal:           topic.NoLocal,
-			Qos:               topic.Qos,
-			SubID:             0,
-		}
-		c.server.subStore.Subscribe(c.ID, sub)
+	for _, subscription := range ps.Subscriptions {
+		c.server.topicStore.Subscribe(c.ID, &subscription)
 	}
 
 	_ = c.writePacket(ack)
@@ -344,7 +326,7 @@ func (c *client) subscribe(ps *packets.Subscribe) {
 // Handle Unsubscribe
 func (c *client) unsubscribe(pu *packets.Unsubscribe) {
 	for _, topic := range pu.Topics {
-		c.server.subStore.Unsubscribe(c.ID, topic)
+		c.server.topicStore.Unsubscribe(c.ID, topic)
 	}
 	ack := &packets.Unsuback{
 		Version:  c.Version,

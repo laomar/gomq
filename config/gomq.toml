@@ -28,7 +28,7 @@ tlscert = "./cert/gomq.crt"
 tlskey = "./cert/gomq.key"
 
 [store]
-type = "ram"
+type = "disk"
 
 [api]
 port = 8421

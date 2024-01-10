@@ -1,7 +1,6 @@
 package config
 
 import (
-	"fmt"
 	"github.com/spf13/viper"
 	. "log"
 	"os"
@@ -113,5 +112,4 @@ func ParseConfig() {
 	_ = viper.UnmarshalKey("store", &Cfg.Store)
 	_ = viper.UnmarshalKey("log", &Cfg.Log)
 	_ = viper.UnmarshalKey("mqtt", &Cfg.Mqtt)
-	fmt.Println(Cfg.Store)
 }

@@ -1,4 +1,4 @@
-package gomq
+package server
 
 import (
 	"context"
@@ -7,7 +7,7 @@ import (
 	. "github.com/laomar/gomq/config"
 	"github.com/laomar/gomq/log"
 	"github.com/laomar/gomq/pkg/packets"
-	"github.com/laomar/gomq/store/subscription"
+	"github.com/laomar/gomq/store/topic"
 	"github.com/pires/go-proxyproto"
 	"github.com/spf13/cobra"
 	"golang.org/x/net/websocket"
@@ -25,14 +25,14 @@ import (
 
 // Server struct
 type Server struct {
-	ctx       context.Context
-	cancel    context.CancelFunc
-	clients   *sync.Map
-	subStore  subscription.Store
-	cancelTcp context.CancelFunc
-	cancelSsl context.CancelFunc
-	cancelWs  context.CancelFunc
-	cancelWss context.CancelFunc
+	ctx        context.Context
+	cancel     context.CancelFunc
+	clients    *sync.Map
+	topicStore topic.Store
+	cancelTcp  context.CancelFunc
+	cancelSsl  context.CancelFunc
+	cancelWs   context.CancelFunc
+	cancelWss  context.CancelFunc
 }
 
 func New() *Server {
@@ -40,17 +40,17 @@ func New() *Server {
 		clients: new(sync.Map),
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
+	switch Cfg.Store.Type {
+	case "disk":
+		s.topicStore = topic.NewDisk()
+	default:
+		s.topicStore = topic.NewRam()
+	}
 	return s
 }
 
 func (s *Server) Init() error {
-	switch Cfg.Store.Type {
-	case "disk":
-		s.subStore = subscription.NewDiskStore()
-	default:
-		s.subStore = subscription.NewRamStore()
-	}
-	s.subStore.Init([]string{"test"})
+	s.topicStore.Init([]string{"mqttx_bf87b741"})
 	return nil
 }
 

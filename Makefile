@@ -23,5 +23,5 @@ docker: clean
 
 clean:
 	@go clean
-	@rm -rf ./$(DIR)/data/*
+	@rm -rf ./$(DIR)/data/log
 	@rm -rf ./$(DIR)/$(APP)*

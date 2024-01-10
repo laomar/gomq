@@ -5,19 +5,20 @@ import (
 	"io"
 )
 
-type Topic struct {
-	Name              string
+type Subscription struct {
+	Topic             string
 	RetainHandling    byte
 	RetainAsPublished bool
 	NoLocal           bool
 	Qos               byte
+	SubID             uint32
 }
 type Subscribe struct {
-	FixHeader  *FixHeader
-	Version    byte
-	PacketID   uint16
-	Topics     []Topic
-	Properties *Properties
+	FixHeader     *FixHeader
+	Version       byte
+	PacketID      uint16
+	Subscriptions []Subscription
+	Properties    *Properties
 }
 
 // Pack Subscribe Packet
@@ -44,22 +45,22 @@ func (s *Subscribe) Unpack(r io.Reader) error {
 			return nil
 		}
 		name := decodeString(bufr)
-		topic := Topic{Name: name}
+		sub := Subscription{Topic: name}
 		opts, err := bufr.ReadByte()
 		if err != nil {
 			return ErrMalformed
 		}
 		if s.Version == V5 {
-			topic.RetainHandling = (opts >> 4) & 0x03
-			topic.RetainAsPublished = opts&0x08 > 0
-			topic.NoLocal = opts&0x04 > 0
-			topic.Qos = opts & 0x03
+			sub.RetainHandling = (opts >> 4) & 0x03
+			sub.RetainAsPublished = opts&0x08 > 0
+			sub.NoLocal = opts&0x04 > 0
+			sub.Qos = opts & 0x03
 		} else {
-			topic.Qos = opts
+			sub.Qos = opts
 		}
-		if topic.Qos > Qos2 {
+		if sub.Qos > Qos2 {
 			return ErrProtocol
 		}
-		s.Topics = append(s.Topics, topic)
+		s.Subscriptions = append(s.Subscriptions, sub)
 	}
 }
