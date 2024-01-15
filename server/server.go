@@ -4,9 +4,10 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
-	. "github.com/laomar/gomq/config"
+	"github.com/laomar/gomq/config"
 	"github.com/laomar/gomq/log"
 	"github.com/laomar/gomq/pkg/packets"
+	"github.com/laomar/gomq/store"
 	"github.com/laomar/gomq/store/topic"
 	"github.com/pires/go-proxyproto"
 	"github.com/spf13/cobra"
@@ -23,16 +24,20 @@ import (
 	"time"
 )
 
+var plugins = make(map[string]Plugin)
+
 // Server struct
 type Server struct {
-	ctx        context.Context
-	cancel     context.CancelFunc
-	clients    *sync.Map
+	ctx     context.Context
+	cancel  context.CancelFunc
+	clients *sync.Map
+
 	topicStore topic.Store
-	cancelTcp  context.CancelFunc
-	cancelSsl  context.CancelFunc
-	cancelWs   context.CancelFunc
-	cancelWss  context.CancelFunc
+
+	cancelTcp context.CancelFunc
+	cancelSsl context.CancelFunc
+	cancelWs  context.CancelFunc
+	cancelWss context.CancelFunc
 }
 
 func New() *Server {
@@ -40,21 +45,46 @@ func New() *Server {
 		clients: new(sync.Map),
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
-	switch Cfg.Store.Type {
-	case "disk":
-		s.topicStore = topic.NewDisk()
-	default:
-		s.topicStore = topic.NewRam()
-	}
 	return s
 }
 
-func (s *Server) Init() error {
-	s.topicStore.Init([]string{"mqttx_bf87b741"})
+func RegPlugin(name string, new NewPlugin) {
+	if _, ok := plugins[name]; !ok {
+		plugin, err := new()
+		if err != nil {
+			log.Errorf("plugin: register %s", name)
+		}
+		plugins[name] = plugin
+	}
+}
+
+func (s *Server) loadPlugin() error {
+	for _, plugin := range plugins {
+		log.Infof("plugin: loading %s", plugin.Name())
+		if err := plugin.Load(); err != nil {
+			return err
+		}
+	}
 	return nil
 }
 
-// Client init
+// Init Server
+func (s *Server) Init() error {
+	var err error
+
+	var se store.Store
+	if se, err = store.NewStore(); err != nil {
+		log.Fatalf("store: %v", err)
+	}
+	if s.topicStore, err = se.NewTopicStore(); err != nil {
+		log.Fatalf("topic store: %v", err)
+	}
+	s.topicStore.Init("mqttx_bf87b741")
+
+	return s.loadPlugin()
+}
+
+// New Client
 func (s *Server) NewClient(ctx context.Context, conn net.Conn) *client {
 	c := &client{
 		server: s,
@@ -69,12 +99,12 @@ func (s *Server) NewClient(ctx context.Context, conn net.Conn) *client {
 }
 
 // TCP server
-func (s *Server) Tcp() {
-	lc, ok := Cfg.Listeners["tcp"]
+func (s *Server) tcp() {
+	lc, ok := config.Cfg.Listeners["tcp"]
 	if !ok || !lc.Enable {
 		return
 	}
-	ln, err := net.Listen("tcp", lc.Address+":"+lc.Port)
+	ln, err := net.Listen("tcp", lc.Addr)
 	if err != nil {
 		log.Errorf("tcp: %v", err)
 		return
@@ -103,14 +133,14 @@ func (s *Server) Tcp() {
 			}
 		}
 	}()
-	log.Infof("tcp: listening %s", lc.Address+":"+lc.Port)
+	log.Infof("tcp: listening [%s]", lc.Addr)
 	<-ctx.Done()
 	log.Info("tcp: closed")
 }
 
-// SSL TCP server
-func (s *Server) ssl() {
-	lc, ok := Cfg.Listeners["ssl"]
+// TLS TCP server
+func (s *Server) tls() {
+	lc, ok := config.Cfg.Listeners["tls"]
 	if !ok || !lc.Enable {
 		return
 	}
@@ -118,15 +148,15 @@ func (s *Server) ssl() {
 	var err error
 	cert, err = tls.LoadX509KeyPair(lc.TLSCert, lc.TLSKey)
 	if err != nil {
-		log.Errorf("ssl: %v", err)
+		log.Errorf("tls: %v", err)
 		return
 	}
 	var ln net.Listener
-	ln, err = tls.Listen("tcp", lc.Address+":"+lc.Port, &tls.Config{
+	ln, err = tls.Listen("tcp", lc.Addr, &tls.Config{
 		Certificates: []tls.Certificate{cert},
 	})
 	if err != nil {
-		log.Errorf("ssl: %v", err)
+		log.Errorf("tls: %v", err)
 		return
 	}
 	var pln net.Listener
@@ -153,14 +183,14 @@ func (s *Server) ssl() {
 			}
 		}
 	}()
-	log.Infof("ssl: listening %s", lc.Address+":"+lc.Port)
+	log.Infof("tls: listening [%s]", lc.Addr)
 	<-ctx.Done()
-	log.Info("ssl: closed")
+	log.Info("tls: closed")
 }
 
 // Websocket server
 func (s *Server) ws() {
-	lc, ok := Cfg.Listeners["ws"]
+	lc, ok := config.Cfg.Listeners["ws"]
 	if !ok || !lc.Enable {
 		return
 	}
@@ -173,7 +203,7 @@ func (s *Server) ws() {
 		c.serve()
 	}))
 	server := &http.Server{
-		Addr:         lc.Address + ":" + lc.Port,
+		Addr:         lc.Addr,
 		Handler:      router,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
@@ -198,7 +228,7 @@ func (s *Server) ws() {
 			log.Errorf("ws: %v", err)
 		}
 	}()
-	log.Infof("ws: listening %s", lc.Address+":"+lc.Port)
+	log.Infof("ws: listening [%s]", lc.Addr)
 	<-ctx.Done()
 	if err := server.Shutdown(ctx); err != nil {
 		log.Errorf("ws: %v", err)
@@ -208,7 +238,7 @@ func (s *Server) ws() {
 
 // Websocket ssl server
 func (s *Server) wss() {
-	lc, ok := Cfg.Listeners["wss"]
+	lc, ok := config.Cfg.Listeners["wss"]
 	if !ok || !lc.Enable {
 		return
 	}
@@ -221,7 +251,7 @@ func (s *Server) wss() {
 		c.serve()
 	}))
 	server := &http.Server{
-		Addr:         lc.Address + ":" + lc.Port,
+		Addr:         lc.Addr,
 		Handler:      router,
 		ReadTimeout:  5 * time.Second,
 		WriteTimeout: 5 * time.Second,
@@ -246,7 +276,7 @@ func (s *Server) wss() {
 			log.Errorf("wss: %v", err)
 		}
 	}()
-	log.Infof("wss: listening %s", lc.Address+":"+lc.Port)
+	log.Infof("wss: listening [%s]", lc.Addr)
 	<-ctx.Done()
 	if err := server.Shutdown(ctx); err != nil {
 		log.Errorf("wss: %v", err)
@@ -262,8 +292,8 @@ func (s *Server) Start() {
 	signal.Notify(reload, syscall.SIGHUP)
 
 	log.Info("gomq: starting...")
-	go s.Tcp()
-	go s.ssl()
+	go s.tcp()
+	go s.tls()
 	go s.ws()
 	go s.wss()
 	go s.Pprof()
@@ -275,7 +305,7 @@ func (s *Server) Start() {
 			log.Info("gomq: stopped")
 			return
 		case <-stop:
-			os.Remove(Cfg.PidFile)
+			os.Remove(config.Cfg.PidFile)
 			s.Stop()
 		case <-reload:
 			s.Reload()
@@ -291,16 +321,16 @@ func (s *Server) Stop() {
 // Reload server
 func (s *Server) Reload() {
 	log.Info("gomq: reload...")
-	ParseConfig()
-	log.Init()
+	config.Cfg.Parse()
+	//log.Init()
 
 	s.cancelTcp()
 	s.cancelSsl()
 	s.cancelWs()
 	s.cancelWss()
 	time.Sleep(1 * time.Second)
-	go s.Tcp()
-	go s.ssl()
+	go s.tcp()
+	go s.tls()
 	go s.ws()
 	go s.wss()
 }
@@ -323,7 +353,7 @@ func ReloadCmd() *cobra.Command {
 		Use:   "reload",
 		Short: "Reload gomq broker",
 		Run: func(cmd *cobra.Command, args []string) {
-			bs, err := os.ReadFile(Cfg.PidFile)
+			bs, err := os.ReadFile(config.Cfg.PidFile)
 			if err != nil {
 				log.Errorf("gomq reload: %v", err)
 				return
@@ -351,7 +381,7 @@ func StopCmd() *cobra.Command {
 		Use:   "stop",
 		Short: "Stop gomq broker",
 		Run: func(cmd *cobra.Command, args []string) {
-			bs, err := os.ReadFile(Cfg.PidFile)
+			bs, err := os.ReadFile(config.Cfg.PidFile)
 			if err != nil {
 				log.Errorf("gomq stop: %v", err)
 				return
@@ -379,14 +409,14 @@ func StartCmd() *cobra.Command {
 		Use:   "start",
 		Short: "Start gomq broker",
 		Run: func(cmd *cobra.Command, args []string) {
-			piddir := filepath.Dir(Cfg.PidFile)
+			piddir := filepath.Dir(config.Cfg.PidFile)
 			if _, err := os.Stat(piddir); os.IsNotExist(err) {
 				if err := os.MkdirAll(piddir, 0755); err != nil {
 					log.Fatalf("gomq start: %v", err)
 				}
 			}
 			pid := fmt.Sprintf("%d", os.Getpid())
-			if err := os.WriteFile(Cfg.PidFile, []byte(pid), 0644); err != nil {
+			if err := os.WriteFile(config.Cfg.PidFile, []byte(pid), 0644); err != nil {
 				log.Fatalf("gomq start: %v", err)
 			}
 			server := New()

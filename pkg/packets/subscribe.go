@@ -7,6 +7,7 @@ import (
 
 type Subscription struct {
 	Topic             string
+	ShareName         string
 	RetainHandling    byte
 	RetainAsPublished bool
 	NoLocal           bool

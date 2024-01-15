@@ -1,41 +1,48 @@
-nodename = "gomq"
 datadir = "./data"
 
 [tcp]
 enable = true
+host = "0.0.0.0"
 port = 1883
 proxy_protocol = false
 
-[ssl]
+[tls]
 enable = true
+host = "0.0.0.0"
 port = 8883
-proxy_protocol = true
+proxy_protocol = false
 tlscert = "./cert/gomq.crt"
 tlskey = "./cert/gomq.key"
 
 [ws]
 enable = true
+host = "0.0.0.0"
 port = 8083
-proxy_protocol = true
+proxy_protocol = false
 path = "/mqtt"
 
 [wss]
 enable = true
-port = 8084
-proxy_protocol = true
+host = "0.0.0.0"
+port = 8483
+proxy_protocol = false
 path = "/mqtt"
 tlscert = "./cert/gomq.crt"
 tlskey = "./cert/gomq.key"
 
 [store]
-type = "disk"
+type = "redis" # ram | disk | redis
+redis.addrs = ["192.168.0.69:6379"]
+redis.user = ""
+redis.pwd = ""
 
 [api]
-port = 8421
+port = 8266
 
 [mqtt]
 retain_available = true
 max_topic_alias = 65535
+max_topic_level = 128
 session_expiry_interval = 60
 max_receive = 128
 max_inflight = 32
@@ -46,14 +53,12 @@ wildcard_sub = true
 sub_id = true
 shared_sub = true
 
-[cluster]
-port = 8422
-discovery = "static"
-nodes = ["192.168.0.6:8422","192.168.0.7:8422"]
-
 [log]
-level = "info"
-format = "json"
-maxage = 7
-maxsize = 10
-maxcount = 10
+level = "debug" # debug | info | warn | error , default: info
+format = "json" # json | text , default: json
+maxage = 7      # log retention days , default: 30
+maxsize = 32    # log file size (MB) , default: 128
+maxcount = 100  # log file retention nums , default: 100
+
+[cluster]
+node_name = "gomq"

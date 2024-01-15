@@ -2,11 +2,13 @@ package server
 
 import (
 	"context"
+	"fmt"
 	. "github.com/laomar/gomq/config"
 	"github.com/laomar/gomq/log"
 	"github.com/laomar/gomq/pkg/packets"
 	"math"
 	"net"
+	"strings"
 	"time"
 )
 
@@ -82,6 +84,7 @@ func (c *client) readLoop() {
 		case <-c.ctx.Done():
 			return
 		default:
+			fmt.Println(c.prop.KeepAlive)
 			if ka := c.prop.KeepAlive; ka > 0 {
 				_ = c.conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(ka/2+ka)))
 			}
@@ -128,15 +131,15 @@ func (c *client) handleLoop() {
 		case *packets.Disconnect:
 			c.disconnect(p)
 		case *packets.Pingreq:
-			c.pingreq()
+			c.pingReqHandler()
 		case *packets.Publish:
-			c.publish(p)
+			c.publishHandler(p)
 		case *packets.Pubrel:
 			c.pubrel(p)
 		case *packets.Subscribe:
-			c.subscribe(p)
+			c.subscribeHandler(p)
 		case *packets.Unsubscribe:
-			c.unsubscribe(p)
+			c.unsubscribeHandler(p)
 		case *packets.Auth:
 			c.auth(p)
 		}
@@ -149,7 +152,7 @@ func (c *client) close() {
 	if c.conn != nil {
 		c.conn.Close()
 	}
-	c.server.topicStore.UnsubscribeAll(c.ID)
+	//c.server.topicStore.UnsubscribeAll(c.ID)
 }
 
 // Handle connect
@@ -237,7 +240,7 @@ func (c *client) connect() bool {
 				ReceiveMaximum:        &Cfg.Mqtt.ReceiveMaximum,
 				MaximumPacketSize:     &Cfg.Mqtt.MaximumPacketSize,
 				ServerKeepAlive:       &c.prop.KeepAlive,
-				TopicAliasMaximum:     &Cfg.Mqtt.TopicAliasMaximum,
+				TopicAliasMaximum:     &Cfg.Mqtt.MaxTopicAlias,
 				MaximumQoS:            &Cfg.Mqtt.MaximumQoS,
 				WildcardSubAvailable:  boolToByte(Cfg.Mqtt.WildcardSub),
 				SubIDAvailable:        boolToByte(Cfg.Mqtt.SubID),
@@ -249,7 +252,7 @@ func (c *client) connect() bool {
 
 		err := c.writePacket(ack)
 		if err == nil {
-			log.Debugf("connect: connected %s", c.ID)
+			log.Infof("connect: connected [%s]", c.ID)
 			return true
 		}
 		return false
@@ -258,6 +261,7 @@ func (c *client) connect() bool {
 }
 
 func (c *client) connectHandler(pc *packets.Connect) byte {
+	fmt.Println(pc.Username, pc.Password)
 	return packets.Success
 }
 
@@ -277,8 +281,11 @@ func (c *client) disconnect(pd *packets.Disconnect) {
 }
 
 // Handle publish
-func (c *client) publish(pp *packets.Publish) {
-	//fmt.Println(string(pp.Payload))
+func (c *client) publishHandler(pp *packets.Publish) {
+	if !Cfg.Mqtt.RetainAvailable && pp.FixHeader.Retain {
+
+	}
+
 	switch pp.FixHeader.Qos {
 	case packets.Qos0:
 	case packets.Qos1:
@@ -309,22 +316,72 @@ func (c *client) pubrel(pp *packets.Pubrel) {
 }
 
 // Handle Subscribe
-func (c *client) subscribe(ps *packets.Subscribe) {
-	ack := &packets.Suback{
+func (c *client) subscribeHandler(ps *packets.Subscribe) {
+	var err error
+	suback := &packets.Suback{
 		Version:  c.Version,
 		PacketID: ps.PacketID,
 		Payload:  make([]byte, len(ps.Subscriptions)),
 	}
 
-	for _, subscription := range ps.Subscriptions {
-		c.server.topicStore.Subscribe(c.ID, &subscription)
+	var subid uint32
+	if c.Version == packets.V5 {
+		if Cfg.Mqtt.SubID && len(ps.Properties.SubscriptionIdentifier) > 0 {
+			subid = ps.Properties.SubscriptionIdentifier[0]
+		}
 	}
 
-	_ = c.writePacket(ack)
+	isExist := false
+	for i, subscription := range ps.Subscriptions {
+		if subscription.Qos > Cfg.Mqtt.MaximumQoS {
+			subscription.Qos = Cfg.Mqtt.MaximumQoS
+		}
+
+		topics := strings.Split(subscription.Topic, "/")
+		if len(topics) > int(Cfg.Mqtt.MaxTopicLevel) && Cfg.Mqtt.MaxTopicLevel > 0 {
+			suback.Payload[i] = packets.Code(c.Version, packets.TopicFilterInvalid)
+			continue
+		}
+		if len(topics) >= 2 && topics[0] == "$share" {
+			subscription.ShareName = topics[1]
+		}
+
+		if !Cfg.Mqtt.SharedSub && subscription.ShareName != "" {
+			suback.Payload[i] = packets.Code(c.Version, packets.SharedSubNotSupported)
+			continue
+		}
+		if !Cfg.Mqtt.WildcardSub {
+			if strings.Contains(subscription.Topic, "#") || strings.Contains(subscription.Topic, "+") {
+				suback.Payload[i] = packets.Code(c.Version, packets.WildcardSubNotSupported)
+				continue
+			}
+		}
+		if !Cfg.Mqtt.SubID && subid > 0 {
+			suback.Payload[i] = packets.Code(c.Version, packets.SubIDNotSupported)
+			continue
+		}
+
+		subscription.SubID = subid
+		isExist, err = c.server.topicStore.Subscribe(c.ID, &subscription)
+		if err != nil {
+			log.Infof("subscribe: failed [%s %s %s]", c.ID, subscription.Topic, err)
+			suback.Payload[i] = packets.UnspecifiedError
+			continue
+		}
+		suback.Payload[i] = subscription.Qos
+		log.Infof("subscribe: succeed [%s %s]", c.ID, subscription.Topic)
+
+		if subscription.ShareName != "" || isExist || subscription.RetainHandling >= 2 {
+			continue
+		}
+
+		// 保留信息
+	}
+	_ = c.writePacket(suback)
 }
 
 // Handle Unsubscribe
-func (c *client) unsubscribe(pu *packets.Unsubscribe) {
+func (c *client) unsubscribeHandler(pu *packets.Unsubscribe) {
 	for _, topic := range pu.Topics {
 		c.server.topicStore.Unsubscribe(c.ID, topic)
 	}
@@ -342,7 +399,7 @@ func (c *client) auth(pa *packets.Auth) {
 }
 
 // Handle ping
-func (c *client) pingreq() {
+func (c *client) pingReqHandler() {
 	resp := &packets.Pingresp{}
-	_ = resp.Pack(c.conn)
+	_ = c.writePacket(resp)
 }

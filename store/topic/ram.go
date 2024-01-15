@@ -19,23 +19,24 @@ func NewRam() *ram {
 	}
 }
 
-func (r *ram) Init(cids []string) error {
+func (r *ram) Init(cids ...string) error {
 	return nil
 }
 
-func (r *ram) Subscribe(cid string, subs ...*packets.Subscription) error {
+func (r *ram) Subscribe(cid string, subs ...*packets.Subscription) (bool, error) {
 	defer r.Unlock()
 	r.Lock()
+	isExist := false
 	for _, sub := range subs {
-		if strings.HasPrefix(sub.Topic, "$share") {
-			r.shareTopic.subscribe(cid, sub)
+		if sub.ShareName != "" {
+			isExist = r.shareTopic.subscribe(cid, sub)
 		} else {
-			r.userTopic.subscribe(cid, sub)
+			isExist = r.userTopic.subscribe(cid, sub)
 		}
 	}
 	//r.userTopic.print()
 	//r.shareTopic.print()
-	return nil
+	return isExist, nil
 }
 
 func (r *ram) Unsubscribe(cid string, topics ...string) error {

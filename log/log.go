@@ -7,15 +7,14 @@ import (
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 	"os"
-	"path/filepath"
 	"strings"
 	"time"
 )
 
-var log *zap.SugaredLogger
+var Logger *zap.Logger
 
 // Init log
-func Init() {
+func init() {
 	ws := make([]zapcore.WriteSyncer, 1)
 	ws[0] = zapcore.AddSync(file())
 	if Cfg.Env == "dev" {
@@ -23,8 +22,9 @@ func Init() {
 	}
 
 	core := zapcore.NewCore(encoder(), zapcore.NewMultiWriteSyncer(ws...), level())
-	logger := zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
-	log = logger.Sugar()
+	Logger = zap.New(core, zap.AddCaller(), zap.AddCallerSkip(1))
+	//Logger = logger.Sugar()
+	defer Logger.Sync()
 }
 
 func encoder() zapcore.Encoder {
@@ -49,7 +49,7 @@ func encoder() zapcore.Encoder {
 
 func file() *lumberjack.Logger {
 	return &lumberjack.Logger{
-		Filename:   Cfg.DataDir + "/log/" + filepath.Base(os.Args[0]) + ".log",
+		Filename:   Cfg.DataDir + "/log/gomq.log",
 		MaxAge:     Cfg.Log.MaxAge,
 		MaxSize:    Cfg.Log.MaxSize,
 		MaxBackups: Cfg.Log.MaxCount,
@@ -80,38 +80,38 @@ func level() (l zapcore.Level) {
 // Log function
 
 func Debug(args ...any) {
-	log.Debug(args...)
+	Logger.Sugar().Debug(args...)
 }
 func Debugf(tpl string, args ...any) {
-	log.Debugf(tpl, args)
+	Logger.Sugar().Debugf(tpl, args...)
 }
 func Info(args ...any) {
-	log.Info(args...)
+	Logger.Sugar().Info(args...)
 }
 func Infof(tpl string, args ...any) {
-	log.Infof(tpl, args)
+	Logger.Sugar().Infof(tpl, args...)
 }
 func Warn(args ...any) {
-	log.Warn(args...)
+	Logger.Sugar().Warn(args...)
 }
 func Warnf(tpl string, args ...any) {
-	log.Warnf(tpl, args)
+	Logger.Sugar().Warnf(tpl, args...)
 }
 func Error(args ...any) {
-	log.Error(args...)
+	Logger.Sugar().Error(args...)
 }
 func Errorf(tpl string, args ...any) {
-	log.Errorf(tpl, args)
+	Logger.Sugar().Errorf(tpl, args...)
 }
 func Fatal(args ...any) {
-	log.Fatal(args...)
+	Logger.Sugar().Fatal(args...)
 }
 func Fatalf(tpl string, args ...any) {
-	log.Fatalf(tpl, args)
+	Logger.Sugar().Fatalf(tpl, args...)
 }
 
-// Logger Gin log middleware
-func Logger() gin.HandlerFunc {
+// Gin Logger log middleware
+func Gin() gin.HandlerFunc {
 	return func(c *gin.Context) {
 	}
 }

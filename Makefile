@@ -2,11 +2,18 @@ DIR = app
 APP = $(shell grep 'Use' ./main.go | awk -F '"' '{print $$2}')
 VERSION = $(shell grep 'Version' ./main.go | awk -F '"' '{print $$2}')
 
-.PHONY: run build clean docker
+.PHONY: run cluster build clean docker
 
 run: clean
 	@go build -o ./$(DIR)/$(APP) .
 	GOMQ_ENV=dev ./$(DIR)/$(APP) start
+
+
+cluster: clean
+	@go build -o ./$(DIR)/$(APP) .
+	GOMQ_ENV=dev GOMQ_CONF=./config/node3.toml ./$(DIR)/$(APP) start &
+	GOMQ_ENV=dev GOMQ_CONF=./config/node2.toml ./$(DIR)/$(APP) start &
+	GOMQ_ENV=dev GOMQ_CONF=./config/node1.toml ./$(DIR)/$(APP) start
 
 
 build: clean
@@ -24,4 +31,5 @@ docker: clean
 clean:
 	@go clean
 	@rm -rf ./$(DIR)/data/log
+	@rm -rf ./$(DIR)/data/*/log
 	@rm -rf ./$(DIR)/$(APP)*

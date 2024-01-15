@@ -35,7 +35,7 @@ const (
 
 // MQTT Qos
 const (
-	Qos0 = iota
+	Qos0 byte = iota
 	Qos1
 	Qos2
 )
@@ -48,7 +48,7 @@ const (
 	RefusedServerUnavailable     = 0x03
 	RefusedBadUsernameOrPassword = 0x04
 	RefusedNotAuthorised         = 0x05
-	SubFail                      = 0x80
+	Failure                      = 0x80
 )
 
 // V5 reason code
@@ -111,6 +111,28 @@ type Error struct {
 
 func (e *Error) Error() string {
 	return fmt.Sprintf("Error Code: %x, Reason: %s", e.Code, e.Reason)
+}
+
+func Code(v, c byte) byte {
+	if v != V5 {
+		switch c {
+		case Success:
+			c = Accepted
+		case UnsupportedProtocolVersion:
+			c = RefusedBadProtocolVersion
+		case ClientIdentifierNotValid:
+			c = RefusedIDRejected
+		case ServerUnavailable:
+			c = RefusedServerUnavailable
+		case BadUserNameOrPassword:
+			c = RefusedBadUsernameOrPassword
+		case NotAuthorized:
+			c = RefusedNotAuthorised
+		case TopicFilterInvalid, SharedSubNotSupported, WildcardSubNotSupported, SubIDNotSupported:
+			c = Failure
+		}
+	}
+	return c
 }
 
 func NewPacket(fh *FixHeader, v byte) Packet {

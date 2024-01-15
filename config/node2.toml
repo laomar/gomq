@@ -1,0 +1,17 @@
+datadir = "./data"
+
+[tcp]
+enable = true
+port = 1884
+
+[ws]
+enable = true
+port = 8084
+path = "/mqtt"
+
+[api]
+port = 8267
+
+[cluster]
+node_name = "node2"
+port = 8867

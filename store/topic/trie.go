@@ -21,7 +21,8 @@ func newTrie(name string) *trie {
 	}
 }
 
-func (t *trie) subscribe(cid string, sub *packets.Subscription) *trie {
+func (t *trie) subscribe(cid string, sub *packets.Subscription) bool {
+	isExist := true
 	names := strings.Split(sub.Topic, "/")
 	node := t
 	for _, name := range names {
@@ -32,11 +33,15 @@ func (t *trie) subscribe(cid string, sub *packets.Subscription) *trie {
 			child := newTrie(name)
 			child.parent = node
 			node.children[name] = child
+			isExist = false
 		}
 		node = node.children[name]
 	}
+	if node.subs[cid] == nil {
+		isExist = false
+	}
 	node.subs[cid] = sub
-	return node
+	return isExist
 }
 
 func (t *trie) print() {
