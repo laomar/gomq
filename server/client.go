@@ -2,7 +2,6 @@ package server
 
 import (
 	"context"
-	"fmt"
 	. "github.com/laomar/gomq/config"
 	"github.com/laomar/gomq/log"
 	"github.com/laomar/gomq/pkg/packets"
@@ -19,7 +18,7 @@ const (
 )
 
 // Client
-type clientProp struct {
+type ClientProp struct {
 	KeepAlive             uint16
 	SessionExpiryInterval uint32
 	MaxInflight           uint16
@@ -30,7 +29,7 @@ type clientProp struct {
 	CleanStart            bool
 	IP                    string
 }
-type client struct {
+type Client struct {
 	ctx     context.Context
 	cancel  context.CancelFunc
 	server  *Server
@@ -41,10 +40,10 @@ type client struct {
 	Status  byte
 	in      chan packets.Packet
 	out     chan packets.Packet
-	prop    *clientProp
+	prop    *ClientProp
 }
 
-func (c *client) serve() {
+func (c *Client) serve() {
 	go c.readLoop()
 	if c.connect() {
 		go c.writeLoop()
@@ -54,7 +53,7 @@ func (c *client) serve() {
 }
 
 // Read packet
-func (c *client) readPacket() (packets.Packet, error) {
+func (c *Client) readPacket() (packets.Packet, error) {
 	var fh packets.FixHeader
 	if err := fh.Unpack(c.conn); err != nil {
 		return nil, err
@@ -68,11 +67,11 @@ func (c *client) readPacket() (packets.Packet, error) {
 }
 
 // Write packet
-func (c *client) writePacket(p packets.Packet) error {
+func (c *Client) writePacket(p packets.Packet) error {
 	return p.Pack(c.conn)
 }
 
-func (c *client) readLoop() {
+func (c *Client) readLoop() {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Errorf("client read recover: %v %v", c.ID, r)
@@ -84,13 +83,12 @@ func (c *client) readLoop() {
 		case <-c.ctx.Done():
 			return
 		default:
-			fmt.Println(c.prop.KeepAlive)
 			if ka := c.prop.KeepAlive; ka > 0 {
 				_ = c.conn.SetReadDeadline(time.Now().Add(time.Second * time.Duration(ka/2+ka)))
 			}
 			p, err := c.readPacket()
 			if err != nil {
-				log.Debugf("client read: %v", err)
+				log.Debugf("client: %v", err)
 				c.close()
 				return
 			}
@@ -99,7 +97,7 @@ func (c *client) readLoop() {
 	}
 }
 
-func (c *client) writeLoop() {
+func (c *Client) writeLoop() {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Errorf("client write recover: %v %v", c.ID, r)
@@ -112,7 +110,7 @@ func (c *client) writeLoop() {
 		case out := <-c.out:
 			err := c.writePacket(out)
 			if err != nil {
-				log.Debugf("client write: %v %v", err, c.ID)
+				log.Debugf("client: %v cid=%v", err, c.ID)
 				c.close()
 				return
 			}
@@ -120,7 +118,7 @@ func (c *client) writeLoop() {
 	}
 }
 
-func (c *client) handleLoop() {
+func (c *Client) handleLoop() {
 	defer func() {
 		if r := recover(); r != nil {
 			log.Errorf("client handle recover: %v %v", c.ID, r)
@@ -147,7 +145,7 @@ func (c *client) handleLoop() {
 }
 
 // Client close
-func (c *client) close() {
+func (c *Client) close() {
 	defer c.cancel()
 	if c.conn != nil {
 		c.conn.Close()
@@ -156,7 +154,7 @@ func (c *client) close() {
 }
 
 // Handle connect
-func (c *client) connect() bool {
+func (c *Client) connect() bool {
 	var pc *packets.Connect
 	for in := range c.in {
 		var code byte
@@ -252,7 +250,7 @@ func (c *client) connect() bool {
 
 		err := c.writePacket(ack)
 		if err == nil {
-			log.Infof("connect: connected [%s]", c.ID)
+			log.Debugf("mqtt: connected cid=%s addr=%s", c.ID, c.conn.RemoteAddr())
 			return true
 		}
 		return false
@@ -260,8 +258,7 @@ func (c *client) connect() bool {
 	return false
 }
 
-func (c *client) connectHandler(pc *packets.Connect) byte {
-	fmt.Println(pc.Username, pc.Password)
+func (c *Client) connectHandler(pc *packets.Connect) byte {
 	return packets.Success
 }
 
@@ -276,14 +273,13 @@ func boolToByte(b bool) *byte {
 }
 
 // Handle disconnect
-func (c *client) disconnect(pd *packets.Disconnect) {
+func (c *Client) disconnect(pd *packets.Disconnect) {
 	c.close()
 }
 
 // Handle publish
-func (c *client) publishHandler(pp *packets.Publish) {
+func (c *Client) publishHandler(pp *packets.Publish) {
 	if !Cfg.Mqtt.RetainAvailable && pp.FixHeader.Retain {
-
 	}
 
 	switch pp.FixHeader.Qos {
@@ -306,7 +302,7 @@ func (c *client) publishHandler(pp *packets.Publish) {
 }
 
 // Handle pubrel
-func (c *client) pubrel(pp *packets.Pubrel) {
+func (c *Client) pubrel(pp *packets.Pubrel) {
 	rec := &packets.Pubcomp{
 		Version:    c.Version,
 		ReasonCode: packets.Success,
@@ -316,7 +312,7 @@ func (c *client) pubrel(pp *packets.Pubrel) {
 }
 
 // Handle Subscribe
-func (c *client) subscribeHandler(ps *packets.Subscribe) {
+func (c *Client) subscribeHandler(ps *packets.Subscribe) {
 	var err error
 	suback := &packets.Suback{
 		Version:  c.Version,
@@ -364,16 +360,18 @@ func (c *client) subscribeHandler(ps *packets.Subscribe) {
 		subscription.SubID = subid
 		isExist, err = c.server.topicStore.Subscribe(c.ID, &subscription)
 		if err != nil {
-			log.Infof("subscribe: failed [%s %s %s]", c.ID, subscription.Topic, err)
+			log.Debugf("subscribe: failed cid=%s topic=%s %s", c.ID, subscription.Topic, err)
 			suback.Payload[i] = packets.UnspecifiedError
 			continue
 		}
 		suback.Payload[i] = subscription.Qos
-		log.Infof("subscribe: succeed [%s %s]", c.ID, subscription.Topic)
+		log.Debugf("subscribe: succeed cid=%s topic=%s", c.ID, subscription.Topic)
 
 		if subscription.ShareName != "" || isExist || subscription.RetainHandling >= 2 {
 			continue
 		}
+
+		c.server.cluster.Subscribe(c.ID, subscription.Topic)
 
 		// 保留信息
 	}
@@ -381,7 +379,7 @@ func (c *client) subscribeHandler(ps *packets.Subscribe) {
 }
 
 // Handle Unsubscribe
-func (c *client) unsubscribeHandler(pu *packets.Unsubscribe) {
+func (c *Client) unsubscribeHandler(pu *packets.Unsubscribe) {
 	for _, topic := range pu.Topics {
 		c.server.topicStore.Unsubscribe(c.ID, topic)
 	}
@@ -394,12 +392,12 @@ func (c *client) unsubscribeHandler(pu *packets.Unsubscribe) {
 }
 
 // Handle auth
-func (c *client) auth(pa *packets.Auth) {
+func (c *Client) auth(pa *packets.Auth) {
 
 }
 
 // Handle ping
-func (c *client) pingReqHandler() {
+func (c *Client) pingReqHandler() {
 	resp := &packets.Pingresp{}
 	_ = c.writePacket(resp)
 }

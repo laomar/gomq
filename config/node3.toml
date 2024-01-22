@@ -1,4 +1,4 @@
-datadir = "./data"
+datadir = "./data/node3"
 
 [tcp]
 enable = true
@@ -14,4 +14,9 @@ port = 8268
 
 [cluster]
 node_name = "node3"
-port = 8868
+grpc_port = 8868
+gossip_port = 8668
+retry_join = ["127.0.0.1:8666", "127.0.0.1:8667", "127.0.0.1:8668"]
+retry_interval = 5
+retry_timeout = 30
+rejoin_after_leave = true

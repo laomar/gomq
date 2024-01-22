@@ -32,7 +32,7 @@ tlskey = "./cert/gomq.key"
 
 [store]
 type = "redis" # ram | disk | redis
-redis.addrs = ["192.168.0.69:6379"]
+redis.addrs = "192.168.0.69:6379"
 redis.user = ""
 redis.pwd = ""
 
@@ -59,6 +59,3 @@ format = "json" # json | text , default: json
 maxage = 7      # log retention days , default: 30
 maxsize = 32    # log file size (MB) , default: 128
 maxcount = 100  # log file retention nums , default: 100
-
-[cluster]
-node_name = "gomq"

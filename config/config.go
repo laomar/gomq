@@ -1,20 +1,23 @@
 package config
 
 import (
+	"github.com/mitchellh/mapstructure"
 	"github.com/spf13/viper"
 	"log"
 	"os"
 	"path"
 	"path/filepath"
+	"strconv"
 	"strings"
+	"time"
 )
 
 type listener struct {
 	Enable        bool
 	Host          string
-	Port          string
+	Port          int
 	Addr          string
-	ProxyProtocol bool `mapstructure:"proxy_protocol"`
+	ProxyProtocol bool `toml:"proxy_protocol"`
 	Path          string
 	CACert        string
 	TLSCert       string
@@ -30,18 +33,18 @@ type Log struct {
 }
 
 type mqtt struct {
-	RetainAvailable       bool   `mapstructure:"retain_available"`
-	MaxTopicAlias         uint16 `mapstructure:"max_topic_alias"`
-	MaxTopicLevel         uint16 `mapstructure:"max_topic_level"`
-	SessionExpiryInterval uint32 `mapstructure:"session_expiry_interval"`
-	ReceiveMaximum        uint16 `mapstructure:"max_receive"`
-	ServerKeepAlive       uint16 `mapstructure:"server_keep_alive"`
-	MaximumPacketSize     uint32 `mapstructure:"max_packet_size"`
-	MaximumQoS            byte   `mapstructure:"max_qos"`
-	WildcardSub           bool   `mapstructure:"wildcard_sub"`
-	SubID                 bool   `mapstructure:"sub_id"`
-	SharedSub             bool   `mapstructure:"shared_sub"`
-	MaxInflight           uint16 `mapstructure:"max_inflight"`
+	RetainAvailable       bool   `toml:"retain_available"`
+	MaxTopicAlias         uint16 `toml:"max_topic_alias"`
+	MaxTopicLevel         uint16 `toml:"max_topic_level"`
+	SessionExpiryInterval uint32 `toml:"session_expiry_interval"`
+	ReceiveMaximum        uint16 `toml:"max_receive"`
+	ServerKeepAlive       uint16 `toml:"server_keep_alive"`
+	MaximumPacketSize     uint32 `toml:"max_packet_size"`
+	MaximumQoS            byte   `toml:"max_qos"`
+	WildcardSub           bool   `toml:"wildcard_sub"`
+	SubID                 bool   `toml:"sub_id"`
+	SharedSub             bool   `toml:"shared_sub"`
+	MaxInflight           uint16 `toml:"max_inflight"`
 }
 
 type store struct {
@@ -55,6 +58,17 @@ type redis struct {
 	Pwd   string
 }
 
+type cluster struct {
+	NodeName         string        `toml:"node_name"`
+	GrpcPort         int           `toml:"grpc_port"`
+	GossipHost       string        `toml:"gossip_host"`
+	GossipPort       int           `toml:"gossip_port"`
+	RetryJoin        []string      `toml:"retry_join"`
+	RetryInterval    time.Duration `toml:"retry_interval"`
+	RetryTimeout     time.Duration `toml:"retry_timeout"`
+	RejoinAfterLeave bool          `toml:"rejoin_after_leave"`
+}
+
 type config struct {
 	Env       string
 	DataDir   string
@@ -63,23 +77,29 @@ type config struct {
 	Listeners map[string]*listener
 	Store     store
 	Mqtt      mqtt
-	Log
-	Plugins map[string]Config
+	Cluster   cluster
+	Log       Log
+	Plugins   map[string]Config
 }
 
 type Config interface {
-	Parse()
 	Validate() error
 }
 
 var Cfg *config
+var DecoderConfigOption = func(c *mapstructure.DecoderConfig) {
+	c.TagName = "toml"
+}
 
-func Default() {
+// Init Config
+func Init() {
 	// Default value
 	viper.SetDefault("env", "prod")
 	viper.SetDefault("datadir", "./data")
 	viper.SetDefault("tcp.port", 1883)
 	viper.SetDefault("log.level", "info")
+	viper.SetDefault("grpc.port", 8866)
+	viper.SetDefault("gossip.port", 8666)
 
 	// Environment variables
 	viper.SetEnvPrefix("gomq")
@@ -101,34 +121,41 @@ func Default() {
 		log.Fatal(err)
 	}
 
-	// data dir
-	datadir := abs(viper.GetString("datadir"))
-	if _, err := os.Stat(datadir); os.IsNotExist(err) {
-		if err := os.MkdirAll(datadir, 0755); err != nil {
-			log.Fatal(err)
-		}
-	}
-
-	// cluster dir
-	nodeName := viper.GetString("cluster.node_name")
-	if nodeName != "" {
-		datadir += "/" + nodeName
-	}
-
 	Cfg = &config{
 		Env:      viper.GetString("env"),
-		DataDir:  datadir,
-		PidFile:  datadir + "/gomq.pid",
-		NodeName: nodeName,
+		DataDir:  viper.GetString("datadir"),
+		NodeName: viper.GetString("cluster.node_name"),
 		Listeners: map[string]*listener{
 			"tcp": &listener{
 				Enable: true,
-				Port:   viper.GetString("tcp.port"),
+				Port:   viper.GetInt("tcp.port"),
 				Addr:   ":" + viper.GetString("tcp.port"),
 			},
 		},
 		Store: store{
 			Type: "disk",
+		},
+		Cluster: cluster{
+			NodeName:         viper.GetString("cluster.node_name"),
+			GrpcPort:         viper.GetInt("grpc.port"),
+			GossipPort:       viper.GetInt("gossip.port"),
+			RetryInterval:    5 * time.Second,
+			RetryTimeout:     30 * time.Second,
+			RejoinAfterLeave: true,
+		},
+		Mqtt: mqtt{
+			RetainAvailable:       true,
+			MaxTopicAlias:         65535,
+			MaxTopicLevel:         128,
+			SessionExpiryInterval: 60,
+			ReceiveMaximum:        128,
+			ServerKeepAlive:       0,
+			MaximumPacketSize:     10240,
+			MaximumQoS:            2,
+			WildcardSub:           true,
+			SubID:                 true,
+			SharedSub:             true,
+			MaxInflight:           32,
 		},
 		Log: Log{
 			Level:    viper.GetString("log.level"),
@@ -137,36 +164,50 @@ func Default() {
 			MaxSize:  128,
 			MaxCount: 100,
 		},
+		Plugins: make(map[string]Config),
 	}
 }
 
 // Parse Config
 func (c *config) Parse() error {
+	// Parse listener
 	lns := make(map[string]*listener)
 	for _, t := range []string{"tcp", "tls", "ws", "wss"} {
 		ln := &listener{}
-		if err := viper.UnmarshalKey(t, ln); err != nil {
+		if err := viper.UnmarshalKey(t, ln, DecoderConfigOption); err != nil {
 			return err
 		}
 		if t == "tls" || t == "wss" {
-			ln.CACert = abs(viper.GetString(t + ".cacert"))
-			ln.TLSCert = abs(viper.GetString(t + ".tlscert"))
-			ln.TLSKey = abs(viper.GetString(t + ".tlskey"))
+			ln.CACert = abs(ln.CACert)
+			ln.TLSCert = abs(ln.TLSCert)
+			ln.TLSKey = abs(ln.TLSKey)
 		}
-		ln.Addr = ln.Host + ":" + ln.Port
+		ln.Addr = ln.Host + ":" + strconv.Itoa(ln.Port)
 		lns[t] = ln
 	}
 	Cfg.Listeners = lns
 
-	if err := viper.UnmarshalKey("log", &Cfg.Log); err != nil {
+	if err := viper.Unmarshal(Cfg, DecoderConfigOption); err != nil {
 		return err
 	}
-	if err := viper.UnmarshalKey("store", &Cfg.Store); err != nil {
-		return err
+
+	// Parse data dir
+	datadir := abs(Cfg.DataDir)
+	if _, err := os.Stat(datadir); os.IsNotExist(err) {
+		if err := os.MkdirAll(datadir, 0755); err != nil {
+			return err
+		}
 	}
-	if err := viper.UnmarshalKey("mqtt", &Cfg.Mqtt); err != nil {
-		return err
+	Cfg.DataDir = datadir
+	Cfg.PidFile = datadir + "/gomq.pid"
+
+	// Parse plugin
+	for name, cfg := range c.Plugins {
+		if err := viper.UnmarshalKey(name, cfg, DecoderConfigOption); err != nil {
+			return err
+		}
 	}
+
 	return c.Validate()
 }
 
@@ -184,12 +225,15 @@ func abs(p string) string {
 }
 
 func init() {
-	Default()
+	Init()
 	if err := Cfg.Parse(); err != nil {
 		log.Fatal(err)
 	}
 }
 
-func RegPluginConfig(name string, cfg Config) {
-
+func ParsePlugin(name string, cfg Config) {
+	if err := viper.UnmarshalKey(name, cfg, DecoderConfigOption); err != nil {
+		log.Fatal(err)
+	}
+	Cfg.Plugins[name] = cfg
 }

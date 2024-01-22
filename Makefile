@@ -2,7 +2,7 @@ DIR = app
 APP = $(shell grep 'Use' ./main.go | awk -F '"' '{print $$2}')
 VERSION = $(shell grep 'Version' ./main.go | awk -F '"' '{print $$2}')
 
-.PHONY: run cluster build clean docker
+.PHONY: run cluster build clean docker proto
 
 run: clean
 	@go build -o ./$(DIR)/$(APP) .
@@ -11,9 +11,9 @@ run: clean
 
 cluster: clean
 	@go build -o ./$(DIR)/$(APP) .
-	GOMQ_ENV=dev GOMQ_CONF=./config/node3.toml ./$(DIR)/$(APP) start &
+	GOMQ_ENV=dev GOMQ_CONF=./config/node1.toml ./$(DIR)/$(APP) start &
 	GOMQ_ENV=dev GOMQ_CONF=./config/node2.toml ./$(DIR)/$(APP) start &
-	GOMQ_ENV=dev GOMQ_CONF=./config/node1.toml ./$(DIR)/$(APP) start
+	GOMQ_ENV=dev GOMQ_CONF=./config/node3.toml ./$(DIR)/$(APP) start
 
 
 build: clean
@@ -28,8 +28,10 @@ docker: clean
 	docker buildx build --platform linux/amd64,linux/arm64 --build-arg APP=$(APP) -t laomar/gomq:$(VERSION) . --push
 	@rm -f ./$(DIR)/$(APP)-amd64 ./$(DIR)/$(APP)-arm64
 
+proto:
+	protoc --go_out=. --go-grpc_out=. --go-grpc_opt=paths=import ./cluster/proto/*.proto
+	protoc-go-inject-tag -input="./cluster/*.pb.go"
+
 clean:
 	@go clean
-	@rm -rf ./$(DIR)/data/log
-	@rm -rf ./$(DIR)/data/*/log
 	@rm -rf ./$(DIR)/$(APP)*

@@ -9,7 +9,7 @@ import (
 )
 
 type disk struct {
-	ram *ram
+	ram *Ram
 	db  *leveldb.DB
 }
 

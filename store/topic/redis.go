@@ -9,7 +9,7 @@ import (
 )
 
 type redis struct {
-	ram    *ram
+	ram    *Ram
 	db     goredis.UniversalClient
 	prefix string
 }

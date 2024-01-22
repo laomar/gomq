@@ -44,10 +44,20 @@ func (t *trie) subscribe(cid string, sub *packets.Subscription) bool {
 	return isExist
 }
 
-func (t *trie) print() {
-	fmt.Println(t.name, t.subs)
+func (t *trie) print(pname ...string) {
+	if t.name != "user" && t.name != "share" {
+		pname = append(pname, t.name)
+		if len(t.subs) > 0 {
+			fmt.Print(strings.Join(pname, "/") + ":")
+			for k, _ := range t.subs {
+				fmt.Print(" " + k)
+			}
+			fmt.Println()
+		}
+	}
+
 	for _, c := range t.children {
-		c.print()
+		c.print(pname...)
 	}
 }
 

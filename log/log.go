@@ -16,7 +16,7 @@ var Logger *zap.Logger
 // Init log
 func init() {
 	ws := make([]zapcore.WriteSyncer, 1)
-	ws[0] = zapcore.AddSync(file())
+	ws[0] = zapcore.AddSync(File())
 	if Cfg.Env == "dev" {
 		ws = append(ws, os.Stdout)
 	}
@@ -47,7 +47,7 @@ func encoder() zapcore.Encoder {
 	return e
 }
 
-func file() *lumberjack.Logger {
+func File() *lumberjack.Logger {
 	return &lumberjack.Logger{
 		Filename:   Cfg.DataDir + "/log/gomq.log",
 		MaxAge:     Cfg.Log.MaxAge,

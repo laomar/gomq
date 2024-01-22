@@ -1,0 +1,41 @@
+syntax = "proto3";
+
+option go_package = "./cluster;cluster";
+
+service Cluster {
+  rpc Ping(PingReq) returns (PingRsp) {}
+  rpc Sync(stream Event) returns (stream Ack) {}
+}
+
+message PingReq {
+  string sessionId = 1;
+}
+
+message PingRsp {
+  bool  restart = 1;
+  uint64 nextId = 2;
+}
+
+message Event {
+  uint64 id = 1;
+  oneof event {
+    Subscribe     subscribe = 2;
+    Message         message = 3;
+    Unsubscribe unsubscribe = 4;
+  }
+}
+
+message Subscribe {
+  string topic = 1;
+}
+message Message {
+  string topic   = 1;
+  bytes  payload = 2;
+}
+message Unsubscribe {
+  string topic = 1;
+}
+
+message Ack {
+  uint64 id = 1;
+}

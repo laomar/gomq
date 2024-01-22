@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"fmt"
+	"github.com/laomar/gomq/cluster"
 	"github.com/laomar/gomq/config"
 	"github.com/laomar/gomq/log"
 	"github.com/laomar/gomq/pkg/packets"
@@ -28,21 +29,22 @@ var plugins = make(map[string]Plugin)
 
 // Server struct
 type Server struct {
-	ctx     context.Context
-	cancel  context.CancelFunc
-	clients *sync.Map
-
+	ctx        context.Context
+	cancel     context.CancelFunc
+	wg         sync.WaitGroup
 	topicStore topic.Store
-
-	cancelTcp context.CancelFunc
-	cancelSsl context.CancelFunc
-	cancelWs  context.CancelFunc
-	cancelWss context.CancelFunc
+	cluster    *cluster.Cluster
+	clients    *sync.Map
+	cancelTcp  context.CancelFunc
+	cancelSsl  context.CancelFunc
+	cancelWs   context.CancelFunc
+	cancelWss  context.CancelFunc
 }
 
 func New() *Server {
 	s := &Server{
 		clients: new(sync.Map),
+		cluster: cluster.New(),
 	}
 	s.ctx, s.cancel = context.WithCancel(context.Background())
 	return s
@@ -72,27 +74,26 @@ func (s *Server) loadPlugin() error {
 func (s *Server) Init() error {
 	var err error
 
+	// init store
 	var se store.Store
 	if se, err = store.NewStore(); err != nil {
 		log.Fatalf("store: %v", err)
 	}
 	if s.topicStore, err = se.NewTopicStore(); err != nil {
-		log.Fatalf("topic store: %v", err)
+		log.Fatalf("store: topic %v", err)
 	}
-	s.topicStore.Init("mqttx_bf87b741")
 
 	return s.loadPlugin()
 }
 
-// New Client
-func (s *Server) NewClient(ctx context.Context, conn net.Conn) *client {
-	c := &client{
+func (s *Server) NewClient(ctx context.Context, conn net.Conn) *Client {
+	c := &Client{
 		server: s,
 		conn:   conn,
 		Status: Connecting,
 		in:     make(chan packets.Packet, 16),
 		out:    make(chan packets.Packet, 16),
-		prop:   new(clientProp),
+		prop:   new(ClientProp),
 	}
 	c.ctx, c.cancel = context.WithCancel(ctx)
 	return c
@@ -100,6 +101,8 @@ func (s *Server) NewClient(ctx context.Context, conn net.Conn) *client {
 
 // TCP server
 func (s *Server) tcp() {
+	s.wg.Add(1)
+	defer s.wg.Done()
 	lc, ok := config.Cfg.Listeners["tcp"]
 	if !ok || !lc.Enable {
 		return
@@ -140,6 +143,8 @@ func (s *Server) tcp() {
 
 // TLS TCP server
 func (s *Server) tls() {
+	s.wg.Add(1)
+	defer s.wg.Done()
 	lc, ok := config.Cfg.Listeners["tls"]
 	if !ok || !lc.Enable {
 		return
@@ -190,6 +195,8 @@ func (s *Server) tls() {
 
 // Websocket server
 func (s *Server) ws() {
+	s.wg.Add(1)
+	defer s.wg.Done()
 	lc, ok := config.Cfg.Listeners["ws"]
 	if !ok || !lc.Enable {
 		return
@@ -238,6 +245,8 @@ func (s *Server) ws() {
 
 // Websocket ssl server
 func (s *Server) wss() {
+	s.wg.Add(1)
+	defer s.wg.Done()
 	lc, ok := config.Cfg.Listeners["wss"]
 	if !ok || !lc.Enable {
 		return
@@ -286,12 +295,16 @@ func (s *Server) wss() {
 
 // Start server
 func (s *Server) Start() {
+	// signal
 	stop := make(chan os.Signal)
 	signal.Notify(stop, syscall.SIGINT, syscall.SIGTERM, syscall.SIGQUIT)
 	reload := make(chan os.Signal)
 	signal.Notify(reload, syscall.SIGHUP)
 
 	log.Info("gomq: starting...")
+	if err := s.cluster.Start(); err != nil {
+		log.Fatalf("cluster: %v", err)
+	}
 	go s.tcp()
 	go s.tls()
 	go s.ws()
@@ -301,11 +314,10 @@ func (s *Server) Start() {
 	for {
 		select {
 		case <-s.ctx.Done():
-			time.Sleep(time.Second)
+			s.wg.Wait()
 			log.Info("gomq: stopped")
 			return
 		case <-stop:
-			os.Remove(config.Cfg.PidFile)
 			s.Stop()
 		case <-reload:
 			s.Reload()
@@ -316,19 +328,20 @@ func (s *Server) Start() {
 // Stop server
 func (s *Server) Stop() {
 	defer s.cancel()
+	_ = s.cluster.Stop()
+	_ = os.Remove(config.Cfg.PidFile)
 }
 
 // Reload server
 func (s *Server) Reload() {
 	log.Info("gomq: reload...")
 	config.Cfg.Parse()
-	//log.Init()
 
 	s.cancelTcp()
 	s.cancelSsl()
 	s.cancelWs()
 	s.cancelWss()
-	time.Sleep(1 * time.Second)
+	time.Sleep(time.Second)
 	go s.tcp()
 	go s.tls()
 	go s.ws()
@@ -337,6 +350,8 @@ func (s *Server) Reload() {
 
 // Pprof Listen
 func (s *Server) Pprof() {
+	s.wg.Add(1)
+	defer s.wg.Done()
 	go func() {
 		if err := http.ListenAndServe(":6060", nil); err != nil && err != http.ErrServerClosed {
 			log.Errorf("pprof: %v", err)
